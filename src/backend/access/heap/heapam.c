@@ -31,6 +31,8 @@
  */
 #include "postgres.h"
 
+#include "access/branchheap.h"
+
 #include "access/heapam.h"
 #include "access/heaptoast.h"
 #include "access/hio.h"
@@ -669,7 +671,8 @@ heap_prepare_pagescan(TableScanDesc sscan)
 	 * full page write. Until we can prove that beyond doubt, let's check each
 	 * tuple for visibility the hard way.
 	 */
-	all_visible = PageIsAllVisible(page) && !snapshot->takenDuringRecovery;
+	all_visible = PageIsAllVisible(page) && !snapshot->takenDuringRecovery &&
+		!BranchCatalogScoped(RelationGetRelid(scan->rs_base.rs_rd));
 	check_serializable =
 		CheckForSerializableConflictOutNeeded(scan->rs_base.rs_rd, snapshot);
 

@@ -19,6 +19,8 @@
  */
 #include "postgres.h"
 
+#include "access/branchheap.h"
+
 #include "access/genam.h"
 #include "access/heapam.h"
 #include "access/heaptoast.h"
@@ -2244,7 +2246,8 @@ heapam_scan_sample_next_tuple(TableScanDesc scan, SampleScanState *scanstate,
 
 	page = BufferGetPage(hscan->rs_cbuf);
 	all_visible = PageIsAllVisible(page) &&
-		!scan->rs_snapshot->takenDuringRecovery;
+		!scan->rs_snapshot->takenDuringRecovery &&
+		!BranchCatalogScoped(RelationGetRelid(scan->rs_rd));
 	maxoffset = PageGetMaxOffsetNumber(page);
 
 	for (;;)

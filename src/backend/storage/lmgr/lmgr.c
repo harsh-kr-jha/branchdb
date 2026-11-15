@@ -15,6 +15,8 @@
 
 #include "postgres.h"
 
+#include "access/branchheap.h"
+
 #include "access/subtrans.h"
 #include "access/xact.h"
 #include "catalog/catalog.h"
@@ -427,7 +429,7 @@ LockRelationForExtension(Relation relation, LOCKMODE lockmode)
 
 	SET_LOCKTAG_RELATION_EXTEND(tag,
 								relation->rd_lockInfo.lockRelId.dbId,
-								relation->rd_lockInfo.lockRelId.relId);
+								BranchStorageRelation(relation->rd_lockInfo.lockRelId.relId));
 
 	(void) LockAcquire(&tag, lockmode, false, false);
 }
@@ -445,7 +447,7 @@ ConditionalLockRelationForExtension(Relation relation, LOCKMODE lockmode)
 
 	SET_LOCKTAG_RELATION_EXTEND(tag,
 								relation->rd_lockInfo.lockRelId.dbId,
-								relation->rd_lockInfo.lockRelId.relId);
+								BranchStorageRelation(relation->rd_lockInfo.lockRelId.relId));
 
 	return (LockAcquire(&tag, lockmode, false, true) != LOCKACQUIRE_NOT_AVAIL);
 }
@@ -462,7 +464,7 @@ RelationExtensionLockWaiterCount(Relation relation)
 
 	SET_LOCKTAG_RELATION_EXTEND(tag,
 								relation->rd_lockInfo.lockRelId.dbId,
-								relation->rd_lockInfo.lockRelId.relId);
+								BranchStorageRelation(relation->rd_lockInfo.lockRelId.relId));
 
 	return LockWaiterCount(&tag);
 }
@@ -477,7 +479,7 @@ UnlockRelationForExtension(Relation relation, LOCKMODE lockmode)
 
 	SET_LOCKTAG_RELATION_EXTEND(tag,
 								relation->rd_lockInfo.lockRelId.dbId,
-								relation->rd_lockInfo.lockRelId.relId);
+								BranchStorageRelation(relation->rd_lockInfo.lockRelId.relId));
 
 	LockRelease(&tag, lockmode, false);
 }

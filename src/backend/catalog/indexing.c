@@ -16,6 +16,7 @@
 #include "postgres.h"
 
 #include "access/genam.h"
+#include "access/branchheap.h"
 #include "access/heapam.h"
 #include "access/htup_details.h"
 #include "access/xact.h"
@@ -239,6 +240,7 @@ CatalogTupleInsert(Relation heapRel, HeapTuple tup)
 	indstate = CatalogOpenIndexes(heapRel);
 
 	simple_heap_insert(heapRel, tup);
+	BranchCatalogInserted(heapRel, tup);
 
 	CatalogIndexInsert(indstate, tup, TU_All);
 	CatalogCloseIndexes(indstate);
@@ -259,6 +261,7 @@ CatalogTupleInsertWithInfo(Relation heapRel, HeapTuple tup,
 	CatalogTupleCheckConstraints(heapRel, tup);
 
 	simple_heap_insert(heapRel, tup);
+	BranchCatalogInserted(heapRel, tup);
 
 	CatalogIndexInsert(indstate, tup, TU_All);
 }
@@ -291,6 +294,7 @@ CatalogTuplesMultiInsertWithInfo(Relation heapRel, TupleTableSlot **slot,
 
 		tuple = ExecFetchSlotHeapTuple(slot[i], true, &should_free);
 		tuple->t_tableOid = slot[i]->tts_tableOid;
+		BranchCatalogInserted(heapRel, tuple);
 		CatalogIndexInsert(indstate, tuple, TU_All);
 
 		if (should_free)

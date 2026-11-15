@@ -2,6 +2,17 @@
 #ifndef BRANCHHEAP_H
 #define BRANCHHEAP_H
 #include "nodes/nodes.h"
+#include "access/htup.h"
+#include "utils/relcache.h"
 extern PGDLLIMPORT char *BranchName;
 extern void BranchGuardUtility(Node *node);
+extern bool BranchCatalogEnabled;
+extern bool BranchCatalogInternal;
+extern void BranchCatalogPrepare(void);
+extern bool BranchCatalogScoped(Oid relid);
+extern bool BranchCatalogVisible(HeapTuple tuple);
+extern void BranchCatalogInserted(Relation rel, HeapTuple tuple);
+extern Oid BranchStorageRelation(Oid relid);
+extern void BranchCatalogFork(const char *name);
+extern void BranchCatalogValidateCreate(Node *node);
 #endif

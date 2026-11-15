@@ -15,6 +15,8 @@
  */
 #include "postgres.h"
 
+#include "access/branchheap.h"
+
 #include "catalog/pg_am_d.h"
 
 #include <math.h>
@@ -287,7 +289,8 @@ get_relation_info(PlannerInfo *root, Oid relationObjectId, bool inhparent,
 			{
 				info->indexkeys[i] = index->indkey.values[i];
 				/* Branch shadowing always requires the branch-filtered heap path. */
-				info->canreturn[i] = relation->rd_rel->relam != BRANCH_HEAP_TABLE_AM_OID &&
+				info->canreturn[i] = !BranchCatalogScoped(RelationGetRelid(relation)) &&
+					relation->rd_rel->relam != BRANCH_HEAP_TABLE_AM_OID &&
 					index_can_return(indexRelation, i + 1);
 			}
 

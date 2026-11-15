@@ -13,6 +13,7 @@ top_builddir = ../../../..
 include $(top_builddir)/src/Makefile.global
 
 OBJS = \
+	branchcatalog.o \
 	branchheap.o \
 	heapam.o \
 	heapam_handler.o \

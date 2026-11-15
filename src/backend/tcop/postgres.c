@@ -19,6 +19,8 @@
 
 #include "postgres.h"
 
+#include "access/branchheap.h"
+
 #include <fcntl.h>
 #include <limits.h>
 #include <signal.h>
@@ -1210,6 +1212,8 @@ exec_simple_query(const char *query_string)
 		else
 			oldcontext = MemoryContextSwitchTo(MessageContext);
 
+		if (!IsA(parsetree->stmt, TransactionStmt) && !IsA(parsetree->stmt, VariableSetStmt))
+			BranchCatalogPrepare();
 		querytree_list = pg_analyze_and_rewrite_fixedparams(parsetree, query_string,
 															NULL, 0, NULL);
 
@@ -1547,6 +1551,8 @@ exec_parse_message(const char *query_string,	/* string to execute */
 		 * parameter set is not required to be complete, so we have to use
 		 * pg_analyze_and_rewrite_varparams().
 		 */
+		if (!IsA(raw_parse_tree->stmt, TransactionStmt) && !IsA(raw_parse_tree->stmt, VariableSetStmt))
+			BranchCatalogPrepare();
 		querytree_list = pg_analyze_and_rewrite_varparams(raw_parse_tree,
 														  query_string,
 														  &paramTypes,
@@ -1826,6 +1832,10 @@ exec_bind_message(StringInfo input_message)
 		PushActiveSnapshot(GetTransactionSnapshot());
 		snapshot_set = true;
 	}
+
+	if (psrc->raw_parse_tree && !IsA(psrc->raw_parse_tree->stmt, TransactionStmt) &&
+		!IsA(psrc->raw_parse_tree->stmt, VariableSetStmt))
+		BranchCatalogPrepare();
 
 	/*
 	 * Fetch parameters, if any, and store in the portal's memory context.

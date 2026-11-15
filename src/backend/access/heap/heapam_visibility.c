@@ -66,6 +66,8 @@
 
 #include "postgres.h"
 
+#include "access/branchheap.h"
+
 #include "access/heapam.h"
 #include "access/htup_details.h"
 #include "access/multixact.h"
@@ -300,6 +302,8 @@ HeapTupleSatisfiesSelf(HeapTuple htup, Snapshot snapshot, Buffer buffer)
 
 	Assert(ItemPointerIsValid(&htup->t_self));
 	Assert(htup->t_tableOid != InvalidOid);
+	if (!BranchCatalogVisible(htup))
+		return false;
 
 	if (!HeapTupleHeaderXminCommitted(tuple))
 	{
@@ -763,6 +767,8 @@ HeapTupleSatisfiesDirty(HeapTuple htup, Snapshot snapshot,
 
 	Assert(ItemPointerIsValid(&htup->t_self));
 	Assert(htup->t_tableOid != InvalidOid);
+	if (!BranchCatalogVisible(htup))
+		return false;
 
 	snapshot->xmin = snapshot->xmax = InvalidTransactionId;
 	snapshot->speculativeToken = 0;
@@ -952,6 +958,8 @@ HeapTupleSatisfiesMVCC(HeapTuple htup, Snapshot snapshot,
 
 	Assert(ItemPointerIsValid(&htup->t_self));
 	Assert(htup->t_tableOid != InvalidOid);
+	if (!BranchCatalogVisible(htup))
+		return false;
 
 	if (!HeapTupleHeaderXminCommitted(tuple))
 	{

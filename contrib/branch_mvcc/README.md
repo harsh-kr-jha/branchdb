@@ -1,9 +1,10 @@
 # Persistent branch experiment
 
-Native milestone 2 is implemented in the modified server as `branch_heap`.
-Start with [native_m2/README.md](native_m2/README.md) for builds, primary/unique
-keys, branch-filtered index reads, integration tests and current limits. Main and
-children remain writable; schema branching remains milestone 3.
+Native milestone 3 supports a first parallel migration flow in the modified
+server: branch-local public tables, nullable column additions, primary/unique
+keys, and isolated data with writable main and shared unchanged storage.
+Start with [native_m3/README.md](native_m3/README.md) for builds, connections,
+acceptance tests and the deliberately restricted migration/maintenance scope.
 
 The remainder of this page describes the earlier SQL-only reference prototype.
 

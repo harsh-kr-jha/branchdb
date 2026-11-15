@@ -15,6 +15,7 @@
 #include "postgres.h"
 
 #include "access/amapi.h"
+#include "access/branchheap.h"
 #include "access/heapam.h"
 #include "access/relscan.h"
 #include "access/tableam_indexscan.h"
@@ -61,6 +62,8 @@ heapam_fetch_tid(Relation rel, ItemPointer tid, Snapshot snapshot,
 	found = heap_hot_search_buffer(tid, rel, buf, snapshot, &heapTuple,
 								   all_dead, true);
 	UnlockReleaseBuffer(buf);
+	if (all_dead && BranchCatalogScoped(RelationGetRelid(rel)))
+		*all_dead = false;
 
 	return found;
 }
@@ -361,9 +364,10 @@ heapam_index_getnext_slot(IndexScanDesc scan, ScanDirection direction,
 			 * so the result could be slightly stale.  See the comments above
 			 * visibilitymap_get_status for why this is okay.
 			 */
-			all_visible = VM_ALL_VISIBLE(scan->heapRelation,
-										 ItemPointerGetBlockNumber(&scan->xs_heaptid),
-										 &hscan->xs_vmbuffer);
+			all_visible = !BranchCatalogScoped(RelationGetRelid(scan->heapRelation)) &&
+				VM_ALL_VISIBLE(scan->heapRelation,
+							   ItemPointerGetBlockNumber(&scan->xs_heaptid),
+							   &hscan->xs_vmbuffer);
 
 			if (unlikely(!all_visible))
 			{
@@ -524,7 +528,7 @@ heapam_index_heap_fetch(IndexScanDesc scan, IndexScanHeapData *hscan,
 		/* We've reached the end of the HOT chain. */
 		scan->xs_heap_continue = false;
 
-		if (unlikely(all_dead))
+		if (unlikely(all_dead) && !BranchCatalogScoped(RelationGetRelid(rel)))
 			heapam_index_kill_item(scan);
 	}
 

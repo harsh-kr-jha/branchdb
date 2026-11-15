@@ -19,6 +19,7 @@
 #include <math.h>
 
 #include "access/sysattr.h"
+#include "access/branchheap.h"
 #include "access/tsmapi.h"
 #include "catalog/pg_class.h"
 #include "catalog/pg_am_d.h"
@@ -668,7 +669,8 @@ set_rel_consider_parallel(PlannerInfo *root, RelOptInfo *rel,
 		case RTE_RELATION:
 
 			/* Branch descriptors/mappings are backend-local for this prototype. */
-			if (get_rel_relam(rte->relid) == BRANCH_HEAP_TABLE_AM_OID)
+			if (BranchCatalogScoped(rte->relid) ||
+				get_rel_relam(rte->relid) == BRANCH_HEAP_TABLE_AM_OID)
 				return;
 
 			/*

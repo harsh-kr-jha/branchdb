@@ -24,6 +24,7 @@
 #include "utils/builtins.h"
 #include "utils/memutils.h"
 #include "utils/lsyscache.h"
+#include "utils/inval.h"
 #include "utils/snapmgr.h"
 
 char *BranchName = NULL;
@@ -86,7 +87,7 @@ static void
 unsupported(const char *operation)
 {
 	ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-					errmsg("branch_heap milestone 2 does not support %s", operation)));
+					errmsg("branch_heap milestone 3 does not support %s", operation)));
 }
 
 static void
@@ -100,9 +101,9 @@ admission(LOCKMODE mode)
 	if (IsParallelWorker() || IsolationUsesXactSnapshot())
 		unsupported("parallel execution or isolation above READ COMMITTED");
 	SET_LOCKTAG_ADVISORY(tag, MyDatabaseId, 0x42524e43, 0, 1);
-	if (mode == ExclusiveLock && LockHeldByMe(&tag, ShareLock, false))
+	if (mode == ExclusiveLock && !LockHeldByMe(&tag, ExclusiveLock, false) && LockHeldByMe(&tag, ShareLock, false))
 		unsupported("fork after accessing branch tables in the same transaction");
-	if (!LockHeldByMe(&tag, mode, false))
+	if (!LockHeldByMe(&tag, mode, true))
 		LockAcquire(&tag, mode, false, false);
 }
 
@@ -161,7 +162,7 @@ static char *
 relation_filter(Relation rel)
 {
 	return psprintf("relid = %u AND generation = " UINT64_FORMAT,
-					RelationGetRelid(rel), (uint64) rel->rd_locator.relNumber);
+					BranchStorageRelation(RelationGetRelid(rel)), (uint64) rel->rd_locator.relNumber);
 }
 
 static char *
@@ -332,7 +333,7 @@ record_version(Relation rel, BranchContext b, int64 id, int64 root,
 				   "(id, root_id, predecessor, branch, relid, generation, block, offset_no, deleted) "
 				   "VALUES (" INT64_FORMAT "," INT64_FORMAT "," INT64_FORMAT "," INT64_FORMAT
 				   ",%u," UINT64_FORMAT ",%u,%u,%s)",
-				   id, root, predecessor, b.id, RelationGetRelid(rel),
+				   id, root, predecessor, b.id, BranchStorageRelation(RelationGetRelid(rel)),
 				   (uint64) rel->rd_locator.relNumber,
 				   tid ? ItemPointerGetBlockNumber(tid) : 0,
 				   tid ? ItemPointerGetOffsetNumber(tid) : 0,
@@ -537,8 +538,13 @@ branch_index_build(Relation rel, Relation index, IndexInfo *info, bool sync,
 	admission(ShareLock);
 	SPI_connect();
 	query("SELECT 1 FROM branch_native.branches WHERE id <> 0 LIMIT 1", GetLatestSnapshot(), true);
-	if (SPI_processed)
-		unsupported("index creation after fork");
+	if (SPI_processed && !BranchCatalogInternal)
+	{
+		if (!BranchCatalogEnabled || BranchStorageRelation(RelationGetRelid(rel)) != RelationGetRelid(rel))
+			unsupported("index creation on shared inherited storage after fork");
+		query(psprintf("SELECT 1 FROM branch_native.objects WHERE source=%u AND object<>%u LIMIT 1",RelationGetRelid(rel),RelationGetRelid(rel)),GetLatestSnapshot(),true);
+		if (SPI_processed) unsupported("index creation on shared inherited storage after fork");
+	}
 	SPI_finish();
 	slot = table_slot_create(rel, NULL);
 	estate = CreateExecutorState();
@@ -614,6 +620,11 @@ branch_create(PG_FUNCTION_ARGS)
 	if (strcmp(BranchName, "main") != 0)
 		unsupported("forking a child branch");
 	admission(ExclusiveLock);
+	if (BranchCatalogEnabled)
+	{
+		AcceptInvalidationMessages();
+		BranchCatalogPrepare();
+	}
 	SPI_connect();
 	query("SELECT 1 FROM pg_prepared_xacts WHERE database = current_database()",
 		  GetLatestSnapshot(), true);
@@ -625,6 +636,7 @@ branch_create(PG_FUNCTION_ARGS)
 				   "SELECT %s, COALESCE(max(id),0) FROM branch_native.versions",
 				   quote_literal_cstr(name)), GetLatestSnapshot(), false);
 	SPI_finish();
+	BranchCatalogFork(name);
 	PG_RETURN_VOID();
 }
 
@@ -636,6 +648,8 @@ BranchGuardUtility(Node *node)
 	bool forked;
 	bool ready;
 	Oid ns;
+
+	if (BranchCatalogInternal) return;
 
 	switch (nodeTag(node))
 	{
@@ -672,6 +686,20 @@ BranchGuardUtility(Node *node)
 	query("SELECT 1 FROM branch_native.branches WHERE id <> 0 LIMIT 1", GetLatestSnapshot(), true);
 	forked = SPI_processed != 0;
 	SPI_finish();
+	if (ready && BranchCatalogEnabled && (IsA(node,CreateStmt) || IsA(node,AlterTableStmt) || IsA(node,IndexStmt)))
+	{
+		LOCKTAG tag;
+		BranchContext b;
+
+		SPI_connect(); b=context(); SPI_finish();
+		SET_LOCKTAG_ADVISORY(tag,MyDatabaseId,0x42524e43,(uint32)b.id,3);
+		if (!LockHeldByMe(&tag,ExclusiveLock,false)) LockAcquire(&tag,ExclusiveLock,false,false);
+		AcceptInvalidationMessages();
+		BranchCatalogPrepare();
+		BranchCatalogValidateCreate(node);
+		if(IsA(node,IndexStmt) && ((IndexStmt *)node)->concurrent) unsupported("concurrent index creation");
+		return;
+	}
 	if (ready && IsA(node, IndexStmt) && ((IndexStmt *) node)->concurrent)
 		unsupported("concurrent index creation");
 	if (ready && IsA(node, AlterTableStmt))
