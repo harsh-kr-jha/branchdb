@@ -1,8 +1,9 @@
 # Native MVCC branching implementation plan
 
-Progress: [milestone 0](MILESTONE_0.md) and [milestone 1](MILESTONE_1.md)
-are complete within their documented prototype limits. Milestone 2 awaits
-the user's go-ahead. Native build/use instructions: [native_m1](native_m1/README.md).
+Progress: [milestone 0](MILESTONE_0.md), [milestone 1](MILESTONE_1.md) and
+[milestone 2](MILESTONE_2.md) are complete within their documented prototype
+limits. Milestone 3 awaits the user's go-ahead. Current native build/use
+instructions: [native_m2](native_m2/README.md).
 
 ## Product contract
 

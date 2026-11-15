@@ -15,6 +15,8 @@
  */
 #include "postgres.h"
 
+#include "catalog/pg_am_d.h"
+
 #include <math.h>
 
 #include "access/genam.h"
@@ -284,7 +286,9 @@ get_relation_info(PlannerInfo *root, Oid relationObjectId, bool inhparent,
 			for (i = 0; i < ncolumns; i++)
 			{
 				info->indexkeys[i] = index->indkey.values[i];
-				info->canreturn[i] = index_can_return(indexRelation, i + 1);
+				/* Branch shadowing always requires the branch-filtered heap path. */
+				info->canreturn[i] = relation->rd_rel->relam != BRANCH_HEAP_TABLE_AM_OID &&
+					index_can_return(indexRelation, i + 1);
 			}
 
 			for (i = 0; i < nkeycolumns; i++)
@@ -308,7 +312,8 @@ get_relation_info(PlannerInfo *root, Oid relationObjectId, bool inhparent,
 				info->amoptionalkey = amroutine->amoptionalkey;
 				info->amsearcharray = amroutine->amsearcharray;
 				info->amsearchnulls = amroutine->amsearchnulls;
-				info->amcanparallel = amroutine->amcanparallel;
+				info->amcanparallel = relation->rd_rel->relam != BRANCH_HEAP_TABLE_AM_OID &&
+					amroutine->amcanparallel;
 				info->amhasgettuple = (amroutine->amgettuple != NULL);
 				info->amhasgetbitmap = amroutine->amgetbitmap != NULL &&
 					relation->rd_tableam->scan_bitmap_next_tuple != NULL;

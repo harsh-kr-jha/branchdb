@@ -1,9 +1,9 @@
 # Persistent branch experiment
 
-Native milestone 1 is implemented in the modified server as `branch_heap`.
-Start with [native_m1/README.md](native_m1/README.md) for builds, ordinary SQL,
-connection selection, integration tests and current limits. This supports native
-row branching with writable main; schema branching remains a later milestone.
+Native milestone 2 is implemented in the modified server as `branch_heap`.
+Start with [native_m2/README.md](native_m2/README.md) for builds, primary/unique
+keys, branch-filtered index reads, integration tests and current limits. Main and
+children remain writable; schema branching remains milestone 3.
 
 The remainder of this page describes the earlier SQL-only reference prototype.
 

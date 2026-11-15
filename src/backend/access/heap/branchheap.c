@@ -9,11 +9,14 @@
 #include "access/branchheap.h"
 #include "access/heapam.h"
 #include "access/parallel.h"
+#include "access/tableam_indexscan.h"
+#include "catalog/index.h"
 #include "access/xact.h"
 #include "catalog/namespace.h"
 #include "catalog/pg_am_d.h"
 #include "catalog/pg_class.h"
 #include "executor/spi.h"
+#include "executor/executor.h"
 #include "fmgr.h"
 #include "miscadmin.h"
 #include "nodes/parsenodes.h"
@@ -49,11 +52,41 @@ typedef struct BranchScan
 	BranchVersion *versions;
 } BranchScan;
 
+/* Prepared before B-tree locks. Never access SPI/catalogs from fetch_tid. */
+static MemoryContext dirty_context;
+static BranchVersion *dirty_versions;
+static int dirty_count;
+static Oid dirty_relid;
+static RelFileNumber dirty_generation;
+
+static void
+reset_dirty(void)
+{
+	dirty_context = NULL;
+	dirty_versions = NULL;
+	dirty_count = 0;
+	dirty_relid = InvalidOid;
+}
+
+static void
+dirty_xact(XactEvent event, void *arg)
+{
+	reset_dirty();
+}
+
+static void
+dirty_subxact(SubXactEvent event, SubTransactionId child,
+			  SubTransactionId parent, void *arg)
+{
+	/* The old memory is owned by the top transaction and freed there. */
+	reset_dirty();
+}
+
 static void
 unsupported(const char *operation)
 {
 	ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-					errmsg("branch_heap milestone 1 does not support %s", operation)));
+					errmsg("branch_heap milestone 2 does not support %s", operation)));
 }
 
 static void
@@ -120,8 +153,8 @@ static void
 check_relation(Relation rel)
 {
 	if (rel->rd_rel->relpersistence != RELPERSISTENCE_PERMANENT ||
-		rel->rd_rel->relhasindex || rel->trigdesc != NULL)
-		unsupported("temporary/unlogged tables, indexes or triggers");
+		rel->trigdesc != NULL)
+		unsupported("temporary/unlogged tables or triggers");
 }
 
 static char *
@@ -231,6 +264,59 @@ branch_rescan(TableScanDesc desc, ScanKeyData *key, bool set,
 	heap->scan_rescan(scan->inner, key, set, strat, sync, pagemode);
 }
 
+static bool
+selected(BranchVersion *versions, int count, ItemPointer tid)
+{
+	int i;
+
+	for (i = 0; i < count; i++)
+		if (!versions[i].deleted && ItemPointerEquals(&versions[i].tid, tid))
+			return true;
+	return false;
+}
+
+static void
+prepare_dirty(Relation rel)
+{
+	MemoryContext old;
+	BranchScan *scan;
+
+	if (dirty_context)
+		MemoryContextDelete(dirty_context);
+	reset_dirty();
+	dirty_context = AllocSetContextCreate(TopTransactionContext,
+										 "branch uniqueness", ALLOCSET_DEFAULT_SIZES);
+	old = MemoryContextSwitchTo(dirty_context);
+	scan = (BranchScan *) branch_begin(rel, GetLatestSnapshot(), 0, NULL, NULL, SO_TYPE_SEQSCAN);
+	dirty_count = scan->count;
+	dirty_versions = palloc(sizeof(BranchVersion) * Max(dirty_count, 1));
+	memcpy(dirty_versions, scan->versions, sizeof(BranchVersion) * dirty_count);
+	branch_end(&scan->base);
+	dirty_relid = RelationGetRelid(rel);
+	dirty_generation = rel->rd_locator.relNumber;
+	MemoryContextSwitchTo(old);
+}
+
+static bool
+branch_fetch_tid(Relation rel, ItemPointer tid, Snapshot snapshot, bool *all_dead)
+{
+	/* A sibling-hidden or superseded tuple is NOT globally dead. */
+	if (all_dead)
+		*all_dead = false;
+	if ((snapshot->snapshot_type != SNAPSHOT_DIRTY && snapshot != SnapshotSelf) ||
+		!dirty_context || dirty_relid != RelationGetRelid(rel) ||
+		dirty_generation != rel->rd_locator.relNumber)
+		unsupported("constraint lookup without a prepared branch snapshot");
+	if (snapshot->snapshot_type == SNAPSHOT_DIRTY)
+	{
+		snapshot->xmin = snapshot->xmax = InvalidTransactionId;
+		snapshot->speculativeToken = 0;
+	}
+	if (!selected(dirty_versions, dirty_count, tid))
+		return false;
+	return heap->fetch_tid(rel, tid, snapshot, NULL);
+}
+
 static int64
 reserve_id(void)
 {
@@ -293,6 +379,7 @@ branch_insert(Relation rel, TupleTableSlot *slot, CommandId cid, uint32 options,
 	heap->tuple_insert(rel, slot, cid, options, bistate);
 	record_version(rel, b, id, id, 0, &slot->tts_tid);
 	SPI_finish();
+	prepare_dirty(rel);
 }
 
 static TM_Result
@@ -314,8 +401,9 @@ branch_update(Relation rel, ItemPointer old, TupleTableSlot *slot, CommandId cid
 	heap->tuple_insert(rel, slot, cid, 0, NULL);
 	record_version(rel, b, id, v.root, v.id, &slot->tts_tid);
 	SPI_finish();
+	prepare_dirty(rel);
 	*mode = LockTupleExclusive;
-	*indexes = TU_None;
+	*indexes = TU_All;
 	return TM_Ok;
 }
 
@@ -354,10 +442,43 @@ branch_speculative(Relation rel, TupleTableSlot *slot, CommandId cid,
 	unsupported("ON CONFLICT / speculative insert");
 }
 
+static bool
+branch_index_next(IndexScanDesc scan, ScanDirection direction, TupleTableSlot *slot)
+{
+	BranchScan *mapping = (BranchScan *) scan->xs_table_opaque;
+
+	while (tableam_index_getnext_tid(scan, direction))
+	{
+		/* Never set kill_prior_tuple for branch-local invisibility. */
+		if (selected(mapping->versions, mapping->count, &scan->xs_heaptid) &&
+			heap->tuple_fetch_row_version(scan->heapRelation, &scan->xs_heaptid,
+									   scan->xs_snapshot, slot))
+			return true;
+	}
+	ExecClearTuple(slot);
+	return false;
+}
+
 static void
 branch_index(IndexScanDesc scan, uint32 flags)
 {
-	unsupported("index scans");
+	if (scan->xs_want_itup || scan->indexRelation->rd_rel->relam != BTREE_AM_OID)
+		unsupported("index-only or non-B-tree scans");
+	scan->xs_table_opaque = branch_begin(scan->heapRelation, scan->xs_snapshot,
+										 0, NULL, NULL, SO_TYPE_SEQSCAN);
+	scan->xs_getnext_slot = branch_index_next;
+}
+
+static void
+branch_index_reset(IndexScanDesc scan)
+{
+	/* Rescans/mark restores share the original statement's mapping. */
+}
+
+static void
+branch_index_end(IndexScanDesc scan)
+{
+	branch_end((TableScanDesc) scan->xs_table_opaque);
 }
 
 static TM_Result
@@ -399,8 +520,47 @@ branch_index_build(Relation rel, Relation index, IndexInfo *info, bool sync,
 				   bool anyvisible, bool progress, BlockNumber start, BlockNumber blocks,
 				   IndexBuildCallback callback, void *state, TableScanDesc scan)
 {
-	unsupported("indexes / primary keys (milestone 2)");
-	return 0;
+	TableScanDesc ownscan;
+	TupleTableSlot *slot;
+	EState *estate;
+	Snapshot snapshot;
+	double count = 0;
+
+	/* Index every retained committed version so old statement snapshots remain
+	 * usable. Only the current main view participates in build-time uniqueness;
+	 * B-tree's secondary spool retains shadowed entries without unique checks. */
+	if (scan || anyvisible || start != 0 || info->ii_Concurrent ||
+		index->rd_rel->relam != BTREE_AM_OID || !index->rd_index->indimmediate ||
+		info->ii_Expressions != NIL || info->ii_Predicate != NIL ||
+		info->ii_ExclusionOps != NULL)
+		unsupported("parallel/concurrent, expression, partial, deferred or non-B-tree index builds");
+	admission(ShareLock);
+	SPI_connect();
+	query("SELECT 1 FROM branch_native.branches WHERE id <> 0 LIMIT 1", GetLatestSnapshot(), true);
+	if (SPI_processed)
+		unsupported("index creation after fork");
+	SPI_finish();
+	slot = table_slot_create(rel, NULL);
+	estate = CreateExecutorState();
+	snapshot = RegisterSnapshot(GetLatestSnapshot());
+	ownscan = branch_begin(rel, snapshot, 0, NULL, NULL, SO_TYPE_SEQSCAN);
+	while (heap->scan_getnextslot(((BranchScan *) ownscan)->inner, ForwardScanDirection, slot))
+	{
+		Datum values[INDEX_MAX_KEYS];
+		bool isnull[INDEX_MAX_KEYS];
+
+		FormIndexDatum(info, slot, estate, values, isnull);
+		callback(index, &slot->tts_tid, values, isnull,
+				 selected(((BranchScan *) ownscan)->versions,
+						  ((BranchScan *) ownscan)->count, &slot->tts_tid), state);
+		count++;
+		ExecClearTuple(slot);
+	}
+	branch_end(ownscan);
+	UnregisterSnapshot(snapshot);
+	ExecDropSingleTupleTableSlot(slot);
+	FreeExecutorState(estate);
+	return count;
 }
 
 static Oid
@@ -414,6 +574,8 @@ branch_heap_handler(PG_FUNCTION_ARGS)
 {
 	if (heap == NULL)
 	{
+		RegisterXactCallback(dirty_xact, NULL);
+		RegisterSubXactCallback(dirty_subxact, NULL);
 		heap = GetHeapamTableAmRoutine();
 		methods = *heap;
 		methods.scan_begin = branch_begin;
@@ -424,6 +586,9 @@ branch_heap_handler(PG_FUNCTION_ARGS)
 		methods.scan_getnextslot_tidrange = NULL;
 		methods.scan_bitmap_next_tuple = NULL;
 		methods.index_scan_begin = branch_index;
+		methods.index_scan_reset = branch_index_reset;
+		methods.index_scan_end = branch_index_end;
+		methods.fetch_tid = branch_fetch_tid;
 		methods.tuple_fetch_row_version = branch_fetch;
 		methods.tuple_insert = branch_insert;
 		methods.tuple_insert_speculative = branch_speculative;
@@ -507,6 +672,17 @@ BranchGuardUtility(Node *node)
 	query("SELECT 1 FROM branch_native.branches WHERE id <> 0 LIMIT 1", GetLatestSnapshot(), true);
 	forked = SPI_processed != 0;
 	SPI_finish();
-	if (forked || (ready && !IsA(node, CreateStmt)))
+	if (ready && IsA(node, IndexStmt) && ((IndexStmt *) node)->concurrent)
+		unsupported("concurrent index creation");
+	if (ready && IsA(node, AlterTableStmt))
+	{
+		ListCell *lc;
+
+		foreach(lc, ((AlterTableStmt *) node)->cmds)
+			if (((AlterTableCmd *) lfirst(lc))->subtype != AT_AddIndex)
+				unsupported("ALTER TABLE other than initial index constraints");
+	}
+	if (forked || (ready && !IsA(node, CreateStmt) && !IsA(node, IndexStmt) &&
+				   !IsA(node, AlterTableStmt)))
 		unsupported("schema/maintenance utilities (catalog branching is milestone 3)");
 }

@@ -21,6 +21,7 @@
 #include "access/sysattr.h"
 #include "access/tsmapi.h"
 #include "catalog/pg_class.h"
+#include "catalog/pg_am_d.h"
 #include "catalog/pg_operator.h"
 #include "catalog/pg_proc.h"
 #include "foreign/fdwapi.h"
@@ -665,6 +666,10 @@ set_rel_consider_parallel(PlannerInfo *root, RelOptInfo *rel,
 	switch (rte->rtekind)
 	{
 		case RTE_RELATION:
+
+			/* Branch descriptors/mappings are backend-local for this prototype. */
+			if (get_rel_relam(rte->relid) == BRANCH_HEAP_TABLE_AM_OID)
+				return;
 
 			/*
 			 * Currently, parallel workers can't access the leader's temporary

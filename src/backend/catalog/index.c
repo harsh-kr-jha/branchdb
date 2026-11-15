@@ -21,6 +21,8 @@
  */
 #include "postgres.h"
 
+#include "catalog/pg_am_d.h"
+
 #include <unistd.h>
 
 #include "access/amapi.h"
@@ -3146,7 +3148,8 @@ index_build(Relation heapRelation,
 	 *
 	 * Note that planner considers parallel safety for us.
 	 */
-	if (parallel && IsNormalProcessingMode() &&
+	if (parallel && heapRelation->rd_rel->relam != BRANCH_HEAP_TABLE_AM_OID &&
+		IsNormalProcessingMode() &&
 		indexRelation->rd_indam->amcanbuildparallel)
 		indexInfo->ii_ParallelWorkers =
 			plan_create_index_workers(RelationGetRelid(heapRelation),
