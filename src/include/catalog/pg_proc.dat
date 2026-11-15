@@ -913,6 +913,15 @@
   prorettype => 'table_am_handler', proargtypes => 'internal',
   prosrc => 'heap_tableam_handler' },
 
+# Experimental branch heap (local prototype OIDs).
+{ oid => '8910', descr => 'experimental branch heap table access method',
+  proname => 'branch_heap_handler', provolatile => 'v',
+  prorettype => 'table_am_handler', proargtypes => 'internal',
+  prosrc => 'branch_heap_handler' },
+{ oid => '8911', descr => 'create an experimental native branch',
+  proname => 'branch_create', provolatile => 'v', proparallel => 'u',
+  prorettype => 'void', proargtypes => 'text', prosrc => 'branch_create' },
+
 # Index access method handlers
 { oid => '330', descr => 'btree index access method handler',
   proname => 'bthandler', provolatile => 'v', prorettype => 'index_am_handler',

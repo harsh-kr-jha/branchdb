@@ -16,6 +16,8 @@
  */
 #include "postgres.h"
 
+#include "access/branchheap.h"
+
 #include "access/reloptions.h"
 #include "access/twophase.h"
 #include "access/xact.h"
@@ -571,6 +573,7 @@ standard_ProcessUtility(PlannedStmt *pstmt,
 	if (readOnlyTree)
 		pstmt = copyObject(pstmt);
 	parsetree = pstmt->utilityStmt;
+	BranchGuardUtility(parsetree);
 
 	/* Prohibit read/write commands in read-only states. */
 	readonly_flags = ClassifyUtilityCommandAsReadOnly(parsetree);

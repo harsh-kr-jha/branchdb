@@ -387,6 +387,13 @@
   boot_val => '""',
 },
 
+{ name => 'branch', type => 'string', context => 'PGC_BACKEND', group => 'CLIENT_CONN_STATEMENT',
+  short_desc => 'Selects an experimental native database branch for this connection.',
+  flags => 'GUC_IS_NAME',
+  variable => 'BranchName',
+  boot_val => '"main"',
+},
+
 { name => 'bytea_output', type => 'enum', context => 'PGC_USERSET', group => 'CLIENT_CONN_STATEMENT',
   short_desc => 'Sets the output format for bytea.',
   variable => 'bytea_output',

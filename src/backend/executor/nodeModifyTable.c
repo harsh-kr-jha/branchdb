@@ -58,6 +58,7 @@
 #include "access/tupconvert.h"
 #include "access/xact.h"
 #include "commands/trigger.h"
+#include "catalog/pg_am_d.h"
 #include "executor/execPartition.h"
 #include "executor/executor.h"
 #include "executor/instrument.h"
@@ -5112,6 +5113,14 @@ ExecInitModifyTable(ModifyTable *node, EState *estate, int eflags)
 			 */
 			resultRelInfo->ri_RootResultRelInfo = mtstate->rootResultRelInfo;
 		}
+
+		/* Fail closed for experimental branch operations before executor
+		 * optimizations can bypass AM speculative-insert callbacks. */
+		if (resultRelInfo->ri_RelationDesc->rd_rel->relam == BRANCH_HEAP_TABLE_AM_OID &&
+			(node->onConflictAction != ONCONFLICT_NONE || operation == CMD_MERGE))
+			ereport(ERROR,
+					(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+					 errmsg("branch_heap milestone 1 does not support ON CONFLICT or MERGE")));
 
 		/* Initialize the usesFdwDirectModify flag */
 		resultRelInfo->ri_usesFdwDirectModify =

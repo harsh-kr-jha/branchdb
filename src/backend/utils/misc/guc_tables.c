@@ -29,6 +29,7 @@
 #include <syslog.h>
 #endif
 
+#include "access/branchheap.h"
 #include "access/commit_ts.h"
 #include "access/gin.h"
 #include "access/htup_details.h"
