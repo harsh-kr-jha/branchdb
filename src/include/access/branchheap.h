@@ -15,4 +15,8 @@ extern void BranchCatalogInserted(Relation rel, HeapTuple tuple);
 extern Oid BranchStorageRelation(Oid relid);
 extern void BranchCatalogFork(const char *name);
 extern void BranchCatalogValidateCreate(Node *node);
+extern void BranchCatalogBypass(bool enabled);
+extern void BranchMaintenanceAdmission(void);
+extern bool BranchMaintenanceWorker(void);
+extern bool BranchMaintenanceUtility(Node *node, bool top);
 #endif

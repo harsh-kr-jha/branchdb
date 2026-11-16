@@ -288,6 +288,8 @@ typedef struct TM_IndexDeleteOp
 
 /* "options" flag bits for table_tuple_delete */
 #define TABLE_DELETE_CHANGING_PARTITION			(1 << 0)
+/* Internal branch GC retains shared external values until TOAST reachability is known. */
+#define TABLE_DELETE_KEEP_TOAST (1 << 2)
 #define TABLE_DELETE_NO_LOGICAL					(1 << 1)
 
 /* "options" flag bits for table_tuple_update */

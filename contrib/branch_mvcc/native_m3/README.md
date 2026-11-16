@@ -1,5 +1,9 @@
 # Milestone 3: native schema and data branches
 
+This records the milestone-3 behavior. [Milestone 4](../native_m4/README.md)
+adds VACUUM/autovacuum and storage collection and supersedes the maintenance
+restrictions below when using the current server.
+
 The modified PostgreSQL server supports a small native migration subset in one
 logical database: branch-local CREATE TABLE, initial primary/unique constraints,
 and nullable ADD COLUMN without defaults. A/B/main use ordinary SQL and startup

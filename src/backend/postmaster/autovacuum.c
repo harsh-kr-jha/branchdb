@@ -62,6 +62,8 @@
  */
 #include "postgres.h"
 
+#include "access/branchheap.h"
+
 #include <math.h>
 #include <signal.h>
 #include <sys/time.h>
@@ -2013,6 +2015,12 @@ do_autovacuum(void)
 
 	/* Start a transaction so our commands have one to play into. */
 	StartTransactionCommand();
+	if (BranchMaintenanceWorker())
+	{
+		CommitTransactionCommand();
+		return;
+	}
+
 
 	/*
 	 * This injection point is put in a transaction block to work with a wait

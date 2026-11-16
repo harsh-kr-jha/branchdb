@@ -573,6 +573,11 @@ standard_ProcessUtility(PlannedStmt *pstmt,
 	if (readOnlyTree)
 		pstmt = copyObject(pstmt);
 	parsetree = pstmt->utilityStmt;
+	if (BranchMaintenanceUtility(parsetree,isTopLevel))
+	{
+		if(qc) SetQueryCompletion(qc,CMDTAG_VACUUM,0);
+		return;
+	}
 	BranchGuardUtility(parsetree);
 
 	/* Prohibit read/write commands in read-only states. */

@@ -59,6 +59,7 @@
 #include "utils/guc.h"
 #include "utils/guc_hooks.h"
 #include "utils/injection_point.h"
+#include "utils/lsyscache.h"
 #include "utils/memutils.h"
 #include "utils/snapmgr.h"
 #include "utils/syscache.h"
@@ -2063,6 +2064,16 @@ vacuum_rel(Oid relid, RangeVar *relation, VacuumParams params,
 
 	/* Begin a transaction for vacuuming this relation */
 	StartTransactionCommand();
+	/* A database can enable native branches after an ordinary maintenance
+	 * scan began. Restart through the group path instead of touching an
+	 * alias using the old per-OID locking protocol. */
+	{
+		Oid ns = get_namespace_oid("branch_native", true);
+
+		if (OidIsValid(ns) && OidIsValid(get_relname_relid("objects", ns)))
+			ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+							errmsg("native branch database activated; retry maintenance through main")));
+	}
 
 	if (!(params.options & VACOPT_FULL))
 	{

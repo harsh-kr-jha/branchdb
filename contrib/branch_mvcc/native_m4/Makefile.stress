@@ -1,0 +1,5 @@
+# Invoked in a temporary directory by test.py, never installed in the server.
+MODULES = xid_stress
+PG_CONFIG ?= pg_config
+PGXS := $(shell $(PG_CONFIG) --pgxs)
+include $(PGXS)

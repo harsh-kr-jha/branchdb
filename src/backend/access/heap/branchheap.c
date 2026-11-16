@@ -11,7 +11,9 @@
 #include "access/parallel.h"
 #include "access/tableam_indexscan.h"
 #include "catalog/index.h"
+#include "commands/vacuum.h"
 #include "access/xact.h"
+#include "access/xlogrecovery.h"
 #include "catalog/namespace.h"
 #include "catalog/pg_am_d.h"
 #include "catalog/pg_class.h"
@@ -87,7 +89,7 @@ static void
 unsupported(const char *operation)
 {
 	ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-					errmsg("branch_heap milestone 3 does not support %s", operation)));
+						errmsg("branch_heap prototype does not support %s", operation)));
 }
 
 static void
@@ -351,7 +353,8 @@ validate_old(Relation rel, BranchContext b, ItemPointer tid)
 				   relation_filter(rel), ItemPointerGetBlockNumber(tid),
 				   ItemPointerGetOffsetNumber(tid)), GetLatestSnapshot(), true);
 	if (SPI_processed != 1)
-		elog(ERROR, "native branch version mapping missing");
+		ereport(ERROR,(errcode(ERRCODE_T_R_SERIALIZATION_FAILURE),
+					errmsg("native branch version was retired; retry transaction")));
 	v.id = number(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, 1);
 	v.root = number(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, 2);
 	query(psprintf("SELECT id FROM branch_native.versions WHERE %s AND root_id = " INT64_FORMAT
@@ -670,6 +673,7 @@ BranchGuardUtility(Node *node)
 		case T_ClosePortalStmt:
 		case T_DeclareCursorStmt:
 		case T_CopyStmt:
+		case T_CheckPointStmt:
 			return;
 		default:
 			break;
@@ -713,4 +717,129 @@ BranchGuardUtility(Node *node)
 	if (forked || (ready && !IsA(node, CreateStmt) && !IsA(node, IndexStmt) &&
 				   !IsA(node, AlterTableStmt)))
 		unsupported("schema/maintenance utilities (catalog branching is milestone 3)");
+}
+
+/* Logical garbage marking precedes ordinary physical vacuum. A branch retains
+ * its selected values/tombstones by durable version ID, independent of XIDs. */
+Datum
+branch_gc(PG_FUNCTION_ARGS)
+{
+	int64 count = 0;
+	MemoryContext caller = CurrentMemoryContext;
+	uint64 i, n;
+	typedef struct DeadVersion { int64 id; Oid relid; int64 generation; ItemPointerData tid; bool deleted; } DeadVersion;
+	DeadVersion *dead;
+
+	if (!BranchCatalogEnabled || strcmp(BranchName,"main") != 0)
+		unsupported("GC outside catalog-enabled main");
+	BranchMaintenanceAdmission();
+	BranchCatalogPrepare();
+	SPI_connect();
+	query("SELECT v.id,v.relid,v.generation,v.block,v.offset_no,v.deleted FROM branch_native.versions v "
+		  "WHERE NOT EXISTS (SELECT FROM branch_native.branches b WHERE v.id=(SELECT w.id "
+		  "FROM branch_native.versions w WHERE w.relid=v.relid AND w.generation=v.generation "
+		  "AND w.root_id=v.root_id AND (w.branch=b.id OR (w.branch=0 AND w.id<=b.cutoff)) "
+		  "ORDER BY (w.branch=b.id) DESC,w.id DESC LIMIT 1)) ORDER BY v.id",GetLatestSnapshot(),true);
+	n=SPI_processed;
+	dead=MemoryContextAllocZero(caller,sizeof(DeadVersion)*Max(n,1));
+	for(i=0;i<n;i++)
+	{
+		HeapTuple t=SPI_tuptable->vals[i];TupleDesc d=SPI_tuptable->tupdesc;bool isnull;
+		dead[i].id=number(t,d,1);
+		dead[i].relid=DatumGetObjectId(SPI_getbinval(t,d,2,&isnull));
+		dead[i].generation=number(t,d,3);
+		dead[i].deleted=DatumGetBool(SPI_getbinval(t,d,6,&isnull));
+		ItemPointerSet(&dead[i].tid,(BlockNumber)number(t,d,4),(OffsetNumber)number(t,d,5));
+	}
+	SPI_finish();
+	BranchCatalogBypass(true);
+	PG_TRY();
+	{
+		for(i=0;i<n;i++)
+		{
+			if(!dead[i].deleted)
+			{
+				Relation r=table_open(dead[i].relid,RowExclusiveLock);
+				TM_FailureData failure;
+				TM_Result result;
+				if ((int64)r->rd_locator.relNumber!=dead[i].generation) elog(ERROR,"branch GC storage generation mismatch");
+				result=heap_delete(r,&dead[i].tid,GetCurrentCommandId(true),
+					TABLE_DELETE_KEEP_TOAST|TABLE_DELETE_NO_LOGICAL,InvalidSnapshot,true,&failure);
+				if(result!=TM_Ok) elog(ERROR,"branch GC physical delete failed: %d",result);
+				table_close(r,NoLock);
+			}
+			SPI_connect();
+			query(psprintf("DELETE FROM branch_native.versions WHERE id=" INT64_FORMAT,dead[i].id),GetLatestSnapshot(),false);
+			SPI_finish();
+			count++;
+		}
+		BranchCatalogBypass(false);
+	}
+	PG_CATCH();
+	{
+		BranchCatalogBypass(false);
+		PG_RE_THROW();
+	}
+	PG_END_TRY();
+	pfree(dead);
+	PG_RETURN_INT64(count);
+}
+
+Datum
+branch_maintain(PG_FUNCTION_ARGS)
+{
+	Oid *relations;
+	uint64 i,n;
+	MemoryContext caller=CurrentMemoryContext;
+	VacuumParams params={0};
+
+	if(!BranchCatalogEnabled || strcmp(BranchName,"main")!=0)
+		unsupported("maintenance outside catalog-enabled main");
+	BranchMaintenanceAdmission();
+	BranchCatalogPrepare();
+	BranchCatalogBypass(true);
+	PG_TRY();
+	{
+		SPI_connect();
+		query("SELECT oid FROM pg_class WHERE relkind IN ('r','t') ORDER BY oid",GetLatestSnapshot(),true);
+		n=SPI_processed;
+		relations=MemoryContextAlloc(caller,sizeof(Oid)*Max(n,1));
+		for(i=0;i<n;i++)
+		{
+			bool isnull;
+			relations[i]=DatumGetObjectId(SPI_getbinval(SPI_tuptable->vals[i],SPI_tuptable->tupdesc,1,&isnull));
+		}
+		SPI_finish();
+		params.options=VACOPT_VACUUM|VACOPT_PROCESS_MAIN;
+		params.index_cleanup=VACOPTVALUE_ENABLED;
+		params.truncate=VACOPTVALUE_DISABLED;
+		params.nworkers=-1;
+		params.log_vacuum_min_duration=-1;
+		params.log_analyze_min_duration=-1;
+		for(i=0;i<n;i++)
+		{
+			Relation r=table_open(relations[i],ShareUpdateExclusiveLock);
+			heap_vacuum_rel(r,&params,NULL);
+			table_close(r,NoLock);
+		}
+		pfree(relations);
+		vac_update_datfrozenxid();
+		BranchCatalogBypass(false);
+	}
+	PG_CATCH();
+	{
+		BranchCatalogBypass(false);
+		PG_RE_THROW();
+	}
+	PG_END_TRY();
+	PG_RETURN_VOID();
+}
+
+void
+BranchMaintenanceAdmission(void)
+{
+	if (XactReadOnly || RecoveryInProgress())
+		ereport(ERROR,(errcode(ERRCODE_READ_ONLY_SQL_TRANSACTION),errmsg("native maintenance requires a writable primary")));
+	if (!BranchCatalogEnabled || strcmp(BranchName,"main")!=0) unsupported("maintenance outside catalog-enabled main");
+	admission(ExclusiveLock);
 }

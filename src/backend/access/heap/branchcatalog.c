@@ -572,3 +572,10 @@ BranchCatalogFork(const char *name)
 	}
 	PG_END_TRY();
 }
+
+/* Only the guarded native maintenance entry points use this override. */
+void
+BranchCatalogBypass(bool enabled)
+{
+	bypass = enabled;
+}

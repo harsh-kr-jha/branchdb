@@ -3187,7 +3187,7 @@ l1:
 		/* toast table entries should never be recursively toasted */
 		Assert(!HeapTupleHasExternal(&tp));
 	}
-	else if (HeapTupleHasExternal(&tp))
+	else if (HeapTupleHasExternal(&tp) && !(options & TABLE_DELETE_KEEP_TOAST))
 		heap_toast_delete(relation, &tp, false);
 
 	/*

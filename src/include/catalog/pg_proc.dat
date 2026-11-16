@@ -914,6 +914,18 @@
   prosrc => 'heap_tableam_handler' },
 
 # Experimental branch heap (local prototype OIDs).
+{ oid => '8915', descr => 'collect unreachable native branch TOAST values',
+  proname => 'branch_gc_toast', provolatile => 'v', proparallel => 'u',
+  prorettype => 'int8', proargtypes => '', prosrc => 'branch_gc_toast' },
+{ oid => '8916', descr => 'remove unreferenced native database relation files',
+  proname => 'branch_gc_files', provolatile => 'v', proparallel => 'u',
+  prorettype => 'int8', proargtypes => '', prosrc => 'branch_gc_files' },
+{ oid => '8913', descr => 'collect globally unreachable native branch row versions',
+  proname => 'branch_gc', provolatile => 'v', proparallel => 'u',
+  prorettype => 'int8', proargtypes => '', prosrc => 'branch_gc' },
+{ oid => '8914', descr => 'freeze retained native branch storage under a database barrier',
+  proname => 'branch_maintain', provolatile => 'v', proparallel => 'u',
+  prorettype => 'void', proargtypes => '', prosrc => 'branch_maintain' },
 { oid => '8910', descr => 'experimental branch heap table access method',
   proname => 'branch_heap_handler', provolatile => 'v',
   prorettype => 'table_am_handler', proargtypes => 'internal',

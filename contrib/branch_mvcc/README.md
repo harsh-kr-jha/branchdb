@@ -1,10 +1,11 @@
 # Persistent branch experiment
 
-Native milestone 3 supports a first parallel migration flow in the modified
+Native milestone 4 supports a first parallel migration flow in the modified
 server: branch-local public tables, nullable column additions, primary/unique
 keys, and isolated data with writable main and shared unchanged storage.
-Start with [native_m3/README.md](native_m3/README.md) for builds, connections,
-acceptance tests and the deliberately restricted migration/maintenance scope.
+It adds branch-aware VACUUM/autovacuum, version/TOAST collection, freezing and
+orphan-file cleanup. Start with [native_m4/README.md](native_m4/README.md) for
+builds, tests and limits; [native_m3](native_m3/README.md) covers connection/setup.
 
 The remainder of this page describes the earlier SQL-only reference prototype.
 
