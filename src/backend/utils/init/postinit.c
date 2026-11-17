@@ -19,6 +19,7 @@
 #include <fcntl.h>
 #include <unistd.h>
 
+#include "access/branchheap.h"
 #include "access/genam.h"
 #include "access/heapam.h"
 #include "access/htup_details.h"
@@ -1262,6 +1263,9 @@ InitPostgres(const char *in_dbname, Oid dboid,
 
 	/* set default namespace search path */
 	InitializeSearchPath();
+
+	if (MyProcPort != NULL)
+		BranchSecurityStartup();
 
 	/* initialize client encoding */
 	InitializeClientEncoding();

@@ -2,6 +2,7 @@
 #ifndef BRANCHHEAP_H
 #define BRANCHHEAP_H
 #include "nodes/nodes.h"
+#include "utils/snapshot.h"
 #include "access/htup.h"
 #include "utils/relcache.h"
 extern PGDLLIMPORT char *BranchName;
@@ -19,4 +20,9 @@ extern void BranchCatalogBypass(bool enabled);
 extern void BranchMaintenanceAdmission(void);
 extern bool BranchMaintenanceWorker(void);
 extern bool BranchMaintenanceUtility(Node *node, bool top);
+
+extern void BranchSecurityStartup(void);
+extern bool BranchSessionAuthorized(void);
+extern int BranchInternalQuery(const char *sql, Snapshot snapshot, bool readonly);
+
 #endif

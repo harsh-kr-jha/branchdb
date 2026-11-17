@@ -97,9 +97,9 @@ admission(LOCKMODE mode)
 {
 	LOCKTAG tag;
 
-	if (!superuser())
+	if (!BranchSessionAuthorized())
 		ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
-						errmsg("experimental native branches require a superuser")));
+						errmsg("native branches require a bound login or a superuser")));
 	if (IsParallelWorker() || IsolationUsesXactSnapshot())
 		unsupported("parallel execution or isolation above READ COMMITTED");
 	SET_LOCKTAG_ADVISORY(tag, MyDatabaseId, 0x42524e43, 0, 1);
@@ -114,16 +114,7 @@ admission(LOCKMODE mode)
 static void
 query(const char *sql, Snapshot snapshot, bool readonly)
 {
-	SPIPlanPtr plan = SPI_prepare(sql, 0, NULL);
-	int result;
-
-	if (plan == NULL)
-		elog(ERROR, "could not prepare branch metadata query");
-	result = SPI_execute_snapshot(plan, NULL, NULL, snapshot,
-								  InvalidSnapshot, readonly, true, 0);
-	if (result < 0)
-		elog(ERROR, "branch metadata SPI error %d", result);
-	SPI_freeplan(plan);
+	BranchInternalQuery(sql, snapshot, readonly);
 }
 
 static int64
@@ -622,6 +613,8 @@ branch_create(PG_FUNCTION_ARGS)
 		ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("invalid branch name")));
 	if (strcmp(BranchName, "main") != 0)
 		unsupported("forking a child branch");
+	if (!superuser())
+		ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE), errmsg("branch administration requires a superuser")));
 	admission(ExclusiveLock);
 	if (BranchCatalogEnabled)
 	{
@@ -653,9 +646,31 @@ BranchGuardUtility(Node *node)
 	Oid ns;
 
 	if (BranchCatalogInternal) return;
+	if (!IsTransactionState() || IsAbortedTransactionBlockState()) return;
+	/* Administrative bootstrap metadata always uses ordinary heap storage. */
+	if (superuser() && (IsA(node, IndexStmt) || IsA(node, AlterTableStmt)))
+	{
+		RangeVar *rv = IsA(node, IndexStmt) ? ((IndexStmt *) node)->relation : ((AlterTableStmt *) node)->relation;
+		if (rv->schemaname && strcmp(rv->schemaname, "branch_native") == 0) return;
+	}
+	if (superuser() && IsA(node, CreateStmt))
+	{
+		CreateStmt *stmt = (CreateStmt *) node;
+		if (stmt->relation->schemaname && strcmp(stmt->relation->schemaname, "branch_native") == 0)
+		{
+			stmt->accessMethod = pstrdup("heap");
+			return;
+		}
+	}
 
 	switch (nodeTag(node))
 	{
+		case T_GrantStmt:
+		case T_GrantRoleStmt:
+		case T_CreateRoleStmt:
+		case T_AlterRoleStmt:
+			if (superuser()) return;
+			break;
 		case T_TransactionStmt:
 			if (((TransactionStmt *) node)->kind == TRANS_STMT_PREPARE &&
 				IsTransactionState() && !IsAbortedTransactionBlockState() &&
@@ -730,8 +745,6 @@ branch_gc(PG_FUNCTION_ARGS)
 	typedef struct DeadVersion { int64 id; Oid relid; int64 generation; ItemPointerData tid; bool deleted; } DeadVersion;
 	DeadVersion *dead;
 
-	if (!BranchCatalogEnabled || strcmp(BranchName,"main") != 0)
-		unsupported("GC outside catalog-enabled main");
 	BranchMaintenanceAdmission();
 	BranchCatalogPrepare();
 	SPI_connect();
@@ -793,8 +806,6 @@ branch_maintain(PG_FUNCTION_ARGS)
 	MemoryContext caller=CurrentMemoryContext;
 	VacuumParams params={0};
 
-	if(!BranchCatalogEnabled || strcmp(BranchName,"main")!=0)
-		unsupported("maintenance outside catalog-enabled main");
 	BranchMaintenanceAdmission();
 	BranchCatalogPrepare();
 	BranchCatalogBypass(true);
@@ -838,6 +849,8 @@ branch_maintain(PG_FUNCTION_ARGS)
 void
 BranchMaintenanceAdmission(void)
 {
+	if (!superuser())
+		ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE), errmsg("branch maintenance requires a superuser")));
 	if (XactReadOnly || RecoveryInProgress())
 		ereport(ERROR,(errcode(ERRCODE_READ_ONLY_SQL_TRANSACTION),errmsg("native maintenance requires a writable primary")));
 	if (!BranchCatalogEnabled || strcmp(BranchName,"main")!=0) unsupported("maintenance outside catalog-enabled main");

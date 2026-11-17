@@ -33,6 +33,14 @@
 #include "utils/snapmgr.h"
 #include "utils/syscache.h"
 
+/* Keep native catalog queries inside the scoped metadata privilege boundary. */
+static int
+catalog_query(const char *sql, bool readonly, long count)
+{
+	Assert(count == 0);
+	return BranchInternalQuery(sql, NULL, readonly);
+}
+
 bool BranchCatalogEnabled = false;
 bool BranchCatalogInternal = false;
 static bool loading;
@@ -188,7 +196,7 @@ BranchCatalogPrepare(void)
 		PushActiveSnapshot(GetLatestSnapshot());
 		pushed = true;
 		SPI_connect();
-		SPI_execute(psprintf("SELECT id FROM branch_native.branches WHERE name=%s",
+		catalog_query(psprintf("SELECT id FROM branch_native.branches WHERE name=%s",
 							 quote_literal_cstr(BranchName)), true, 0);
 		if (SPI_processed != 1)
 		{
@@ -215,7 +223,7 @@ BranchCatalogPrepare(void)
 		MemoryContextSwitchTo(old);
 		/* Shared system/metadata/TOAST descriptors are global even when their
 		 * dynamically allocated OIDs exceed the bootstrap OID range. */
-		SPI_execute("SELECT 'pg_class'::regclass::oid,oid FROM pg_class WHERE relnamespace <> 'public'::regnamespace "
+		catalog_query("SELECT 'pg_class'::regclass::oid,oid FROM pg_class WHERE relnamespace <> 'public'::regnamespace "
 					"UNION ALL SELECT 'pg_type'::regclass::oid,oid FROM pg_type WHERE typnamespace <> 'public'::regnamespace "
 					"UNION ALL SELECT 'pg_constraint'::regclass::oid,oid FROM pg_constraint WHERE connamespace <> 'public'::regnamespace", true, 0);
 		for (i = 0; i < SPI_processed; i++)
@@ -225,7 +233,7 @@ BranchCatalogPrepare(void)
 			Oid obj = DatumGetObjectId(SPI_getbinval(SPI_tuptable->vals[i], SPI_tuptable->tupdesc, 2, &n));
 			remember(cat, obj, -1, InvalidOid);
 		}
-		SPI_execute("SELECT catalog,object,owner,source FROM branch_native.objects", true, 0);
+		catalog_query("SELECT catalog,object,owner,source FROM branch_native.objects", true, 0);
 		for (i = 0; i < SPI_processed; i++)
 		{
 			bool n;
@@ -375,6 +383,7 @@ BranchCatalogValidateCreate(Node *node)
 		{
 			AlterTableCmd *cmd = lfirst_node(AlterTableCmd, lc);
 			if (cmd->subtype == AT_AddIndex) continue;
+			if (cmd->subtype == AT_ChangeOwner && superuser()) continue;
 			if (cmd->subtype != AT_AddColumn || !IsA(cmd->def,ColumnDef)) reject("ALTER TABLE beyond nullable ADD COLUMN");
 			validate_column((ColumnDef *) cmd->def,true);
 		}
@@ -431,7 +440,7 @@ alias_file(Oid destid, Oid sourceid)
 		Oid root = BranchStorageRelation(sourceid);
 
 		SPI_connect();
-		SPI_execute(psprintf("UPDATE branch_native.objects SET source=%u WHERE catalog='pg_class'::regclass AND object=%u",root,destid),false,0);
+		catalog_query(psprintf("UPDATE branch_native.objects SET source=%u WHERE catalog='pg_class'::regclass AND object=%u",root,destid),false,0);
 		SPI_finish();
 		remember(RelationRelationId,destid,owner,root);
 	}
@@ -462,13 +471,13 @@ BranchCatalogFork(const char *name)
 
 	if (!BranchCatalogEnabled) return;
 	SPI_connect();
-	SPI_execute(psprintf("SELECT id FROM branch_native.branches WHERE name=%s",quote_literal_cstr(name)),false,0);
+	catalog_query(psprintf("SELECT id FROM branch_native.branches WHERE name=%s",quote_literal_cstr(name)),false,0);
 	if (SPI_processed != 1) elog(ERROR,"new branch descriptor is not visible");
 	{
 		bool n;
 		child = DatumGetInt64(SPI_getbinval(SPI_tuptable->vals[0], SPI_tuptable->tupdesc,1,&n));
 	}
-	SPI_execute("SELECT c.oid,c.relnamespace,c.reltoastrelid,c.relname,"
+	catalog_query("SELECT c.oid,c.relnamespace,c.reltoastrelid,c.relname,"
 		"format('CREATE TABLE public.%I (%s%s) USING branch_heap WITH (autovacuum_enabled=false)',c.relname,"
 		"(SELECT string_agg(format('%I %s%s',a.attname,format_type(a.atttypid,a.atttypmod),"
 		"CASE WHEN a.attnotnull THEN ' NOT NULL' ELSE '' END),',' ORDER BY a.attnum) FROM pg_attribute a WHERE a.attrelid=c.oid AND a.attnum>0 AND NOT a.attisdropped),"
@@ -489,7 +498,7 @@ BranchCatalogFork(const char *name)
 	for(i=0;i<ntables;i++)
 	{
 		uint64 j;
-		SPI_execute(psprintf("SELECT i.indexrelid,c.relname,pg_get_indexdef(i.indexrelid),"
+		catalog_query(psprintf("SELECT i.indexrelid,c.relname,pg_get_indexdef(i.indexrelid),"
 			"NOT EXISTS(SELECT FROM pg_constraint k WHERE k.conindid=i.indexrelid) FROM pg_index i JOIN pg_class c ON c.oid=i.indexrelid WHERE i.indrelid=%u ORDER BY i.indexrelid",tables[i].source),false,0);
 		tables[i].nindexes=SPI_processed;
 		tables[i].indexes=MemoryContextAllocZero(caller,sizeof(CloneIndex)*Max(SPI_processed,1));
@@ -516,13 +525,13 @@ BranchCatalogFork(const char *name)
 			HeapTuple t;
 
 			SPI_connect();
-			if(SPI_execute(tables[i].ddl,false,0)<0) elog(ERROR,"cannot create branch schema descriptor");
+			if(catalog_query(tables[i].ddl,false,0)<0) elog(ERROR,"cannot create branch schema descriptor");
 			SPI_finish();
 			for(j=0;j<tables[i].nindexes;j++)
 				if(tables[i].indexes[j].standalone)
 				{
 					SPI_connect();
-					if(SPI_execute(tables[i].indexes[j].ddl,false,0)<0) elog(ERROR,"cannot clone branch index descriptor");
+					if(catalog_query(tables[i].indexes[j].ddl,false,0)<0) elog(ERROR,"cannot clone branch index descriptor");
 					SPI_finish();
 				}
 			dest=get_relname_relid(tables[i].name,tables[i].ns);
@@ -552,7 +561,7 @@ BranchCatalogFork(const char *name)
 				alias_file(dstindex,tables[i].indexes[j].source);
 			}
 			SPI_connect();
-			SPI_execute(psprintf("UPDATE branch_native.objects SET source=%u WHERE catalog='pg_class'::regclass AND object=%u",BranchStorageRelation(tables[i].source),dest),false,0);
+			catalog_query(psprintf("UPDATE branch_native.objects SET source=%u WHERE catalog='pg_class'::regclass AND object=%u",BranchStorageRelation(tables[i].source),dest),false,0);
 			SPI_finish();
 			remember(RelationRelationId,dest,child,BranchStorageRelation(tables[i].source));
 		}

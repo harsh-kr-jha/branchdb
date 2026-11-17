@@ -1,5 +1,9 @@
 # Native MVCC branching implementation plan
 
+Developer-beta continuation: [approved checkpoints](DEVELOPER_BETA_PLAN.md).
+[Milestone 6](MILESTONE_6.md) adds authenticated branch-bound roles;
+milestones 7–10 remain planned.
+
 Progress: [milestone 0](MILESTONE_0.md), [milestone 1](MILESTONE_1.md),
 [milestone 2](MILESTONE_2.md), [milestone 3](MILESTONE_3.md),
 [milestone 4](MILESTONE_4.md) and [milestone 5](MILESTONE_5.md) are complete within
