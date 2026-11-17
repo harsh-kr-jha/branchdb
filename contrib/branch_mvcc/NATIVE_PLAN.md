@@ -1,11 +1,11 @@
 # Native MVCC branching implementation plan
 
 Progress: [milestone 0](MILESTONE_0.md), [milestone 1](MILESTONE_1.md),
-[milestone 2](MILESTONE_2.md), [milestone 3](MILESTONE_3.md) and
-[milestone 4](MILESTONE_4.md) are complete within their documented prototype
-limits. Milestone 4 includes maintenance, actual CLOG segment retirement and
+[milestone 2](MILESTONE_2.md), [milestone 3](MILESTONE_3.md),
+[milestone 4](MILESTONE_4.md) and [milestone 5](MILESTONE_5.md) are complete within
+their documented prototype limits. Milestone 4 includes maintenance, actual CLOG segment retirement and
 controlled epoch simulation; exhaustive wraparound/fault testing remains open.
-Current native build/test instructions: [native_m4](native_m4/README.md).
+Current native build/test/demo instructions: [native_m5](native_m5/README.md).
 Connection and schema setup: [native_m3](native_m3/README.md).
 
 ## Product contract
@@ -213,7 +213,7 @@ Run ordinary PostgreSQL regression tests after each subsystem integration.
 
 ## Immediate next deliverable
 
-Milestone 5, after user approval: choose a real web-app migration suite, implement
-its required SQL subset and measure fork latency, blocking, metadata/storage
-growth and query/write costs. Milestones 0–4 are implemented and tested within
-the limits recorded in their reports.
+Milestones 0–5 are implemented and tested within their documented limits. The
+next work should target a selected application's actual migration requirements,
+or improve maintenance concurrency and wraparound validation. The current task
+app fixture and measured overhead are recorded in [milestone 5](MILESTONE_5.md).

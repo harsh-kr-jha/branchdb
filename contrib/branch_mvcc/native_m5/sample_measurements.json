@@ -1,0 +1,92 @@
+{
+  "fixture": "branch_tasks",
+  "benchmark": {
+    "ordinary_heap": {
+      "insert": {
+        "samples": 60,
+        "median_ms": 0.099,
+        "p95_ms": 0.133
+      },
+      "point_read": {
+        "samples": 60,
+        "median_ms": 0.072,
+        "p95_ms": 0.1
+      },
+      "update": {
+        "samples": 60,
+        "median_ms": 0.111,
+        "p95_ms": 0.201
+      }
+    },
+    "native_branch_a": {
+      "insert": {
+        "samples": 60,
+        "median_ms": 1.428,
+        "p95_ms": 1.899
+      },
+      "point_read": {
+        "samples": 60,
+        "median_ms": 1.269,
+        "p95_ms": 1.738
+      },
+      "update": {
+        "samples": 60,
+        "median_ms": 1.918,
+        "p95_ms": 2.515
+      }
+    }
+  },
+  "fork_ms": {
+    "a": 21.445,
+    "b": 18.964
+  },
+  "before_fork": {
+    "database_bytes": 9146483,
+    "metadata_bytes": 385024,
+    "versions": 1002,
+    "baseline_heap_bytes": 688128,
+    "wal_lsn": "0/018C0A40"
+  },
+  "after_fork": {
+    "database_bytes": 9212019,
+    "metadata_bytes": 393216,
+    "versions": 1002,
+    "baseline_heap_bytes": 688128,
+    "wal_lsn": "0/018FB4E8"
+  },
+  "main_observer_during_parallel_migrations": {
+    "samples": 18,
+    "median_ms": 16.754,
+    "p95_ms": 59.292
+  },
+  "after_app_work": {
+    "database_bytes": 9359475,
+    "metadata_bytes": 425984,
+    "versions": 1016,
+    "baseline_heap_bytes": 688128,
+    "wal_lsn": "0/0191C430"
+  },
+  "maintenance_ms": 49.741,
+  "after_maintenance": {
+    "database_bytes": 9597043,
+    "metadata_bytes": 458752,
+    "versions": 1011,
+    "baseline_heap_bytes": 688128,
+    "wal_lsn": "0/0199B1C0"
+  },
+  "fork_with_200ms_deliberate_hold_ms": 275.772,
+  "after_benchmark": {
+    "database_bytes": 9670771,
+    "metadata_bytes": 483328,
+    "versions": 1132,
+    "baseline_heap_bytes": 688128,
+    "wal_lsn": "0/01DFF6B0"
+  },
+  "wal_bytes": {
+    "two_initial_forks": 240296,
+    "app_work_and_cli_fork": 134984,
+    "maintenance": 519568,
+    "heap_benchmark": 18864,
+    "native_benchmark": 107592
+  }
+}

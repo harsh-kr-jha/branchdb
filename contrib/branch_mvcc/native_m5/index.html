@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Branch Tasks</title>
+<style>
+body{font:16px system-ui,sans-serif;max-width:760px;margin:48px auto;padding:0 24px;color:#233448;background:#fafbfc}
+header{display:flex;align-items:center;justify-content:space-between}h1{font-size:26px}
+#branch{background:#e1ece5;color:#21573a;padding:6px 12px;border-radius:6px}
+form,article{padding:20px;margin:16px 0;background:white;border:1px solid #d8e0e8;border-radius:8px}
+input,select,button{font:inherit;padding:8px;margin:4px;border:1px solid #c5cfda;border-radius:4px}
+button{cursor:pointer;background:#eff4fa}small{color:#5b6878}#error{color:#a12626;white-space:pre-wrap}
+label{display:inline-block}label[hidden]{display:none}.title{font-weight:600;margin:0 0 10px}
+</style>
+<header><h1>Branch Tasks</h1><span id="branch">Connecting…</span></header>
+<p>Each app connects to its own database branch. Changes here belong to that branch.</p>
+<small id="migrations"></small><p id="error" role="alert"></p>
+<form id="create"><input name="title" placeholder="What are you building?" required maxlength="500">
+<label id="assignee-field" hidden>Assignee <input name="assignee" maxlength="100"></label>
+<label id="priority-field" hidden>Priority <input name="priority" type="number" value="1"></label>
+<button>Create task</button></form><section id="tasks"></section>
+<script>
+let fields=[];
+async function api(path,method='GET',body){
+ const response=await fetch('/api/'+path,{method,headers:{'Content-Type':'application/json'},body:body===undefined?undefined:JSON.stringify(body)});
+ const value=await response.json();if(!response.ok)throw Error(value.error);return value;
+}
+function fail(error){document.querySelector('#error').textContent=error.message;}
+async function refresh(){
+ const [info,tasks]=await Promise.all([api('info'),api('tasks')]);fields=info.task_columns;
+ document.querySelector('#branch').textContent=info.branch;
+ document.querySelector('#migrations').textContent='Migrations: '+info.migrations.join(', ');
+ for(const field of ['assignee','priority'])document.querySelector('#'+field+'-field').hidden=!fields.includes(field);
+ const list=document.querySelector('#tasks');list.replaceChildren();
+ for(const task of tasks){
+  const card=document.createElement('article'),title=document.createElement('p');title.className='title';title.textContent=task.title;card.append(title);
+  const state=document.createElement('select');for(const value of ['todo','doing','done']){const option=document.createElement('option');option.textContent=value;option.selected=value===task.status;state.append(option);}
+  state.onchange=()=>api('tasks/'+task.id,'PATCH',{status:state.value}).then(refresh).catch(fail);card.append(state);
+  const detail=document.createElement('small');detail.textContent=fields.includes('assignee')?' Assignee: '+(task.assignee||'unassigned'):fields.includes('priority')?' Priority: '+(task.priority??'unset'):'';card.append(detail);
+  const remove=document.createElement('button');remove.textContent='Delete';remove.onclick=()=>api('tasks/'+task.id,'DELETE').then(refresh).catch(fail);card.append(remove);list.append(card);
+ }
+}
+document.querySelector('#create').onsubmit=async event=>{event.preventDefault();try{
+ const form=event.target,body={title:form.elements.title.value};for(const field of ['assignee','priority'])if(fields.includes(field))body[field]=field==='priority'?Number(form.elements[field].value):form.elements[field].value;
+ await api('tasks','POST',body);form.reset();document.querySelector('#error').textContent='';await refresh();
+}catch(error){fail(error)}};
+refresh().catch(fail);setInterval(()=>refresh().catch(fail),5000);
+</script>
+</html>

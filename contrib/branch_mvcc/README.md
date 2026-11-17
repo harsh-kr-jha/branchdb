@@ -1,11 +1,12 @@
 # Persistent branch experiment
 
-Native milestone 4 supports a first parallel migration flow in the modified
+Native milestone 5 provides a runnable web-app MVP on the modified
 server: branch-local public tables, nullable column additions, primary/unique
 keys, and isolated data with writable main and shared unchanged storage.
-It adds branch-aware VACUUM/autovacuum, version/TOAST collection, freezing and
-orphan-file cleanup. Start with [native_m4/README.md](native_m4/README.md) for
-builds, tests and limits; [native_m3](native_m3/README.md) covers connection/setup.
+It includes a browser task app with independent main/A/B processes, transactional
+SQL-file migrations, branch CLI/connection URLs, maintenance/recovery acceptance
+and measured costs. Start with [native_m5/README.md](native_m5/README.md) for
+builds, tests, demo and limits; [native_m3](native_m3/README.md) covers native setup.
 
 The remainder of this page describes the earlier SQL-only reference prototype.
 
