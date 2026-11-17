@@ -356,6 +356,7 @@ run_maintenance(void)
 	InvalidateCatalogSnapshot();
 	PushActiveSnapshot(GetTransactionSnapshot());
 	branch_gc_files(fcinfo);
+	if (BranchLifecycleEnabled) branch_cleanup(fcinfo);
 	branch_maintain(fcinfo);
 	PopActiveSnapshot();
 }

@@ -153,7 +153,8 @@ static const LockMethodData user_lockmethod = {
 static const LockMethod LockMethods[] = {
 	NULL,
 	&default_lockmethod,
-	&user_lockmethod
+	&user_lockmethod,
+	&user_lockmethod /* engine-private native branch locks */
 };
 
 

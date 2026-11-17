@@ -1409,6 +1409,7 @@ ShutdownPostgres(int code, Datum arg)
 	 * them explicitly.
 	 */
 	LockReleaseAll(USER_LOCKMETHOD, true);
+	LockReleaseAll(NATIVE_LOCKMETHOD, true);
 }
 
 

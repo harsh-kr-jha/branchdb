@@ -58,6 +58,8 @@ extern void finish_heap_swap(Oid OIDOldHeap, Oid OIDNewHeap,
 							 MultiXactId cutoffMulti,
 							 char newrelpersistence);
 
+extern void BranchSwapRelationFiles(Oid first, Oid second);
+
 extern void HandleRepackMessageInterrupt(void);
 extern void ProcessRepackMessages(void);
 

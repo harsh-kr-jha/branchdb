@@ -1,5 +1,7 @@
 # Developer beta implementation checkpoints
 
+Completed: [6](MILESTONE_6.md), [7](MILESTONE_7.md). Remaining: 8–10.
+
 Approved defaults: Prisma first with migrate dev/shadow database, then Django;
 macOS ARM64 and Linux x86_64 native runtimes plus Linux container; developer beta
 with maintenance pauses retained. Branch deletion refuses connected sessions by

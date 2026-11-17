@@ -481,6 +481,7 @@ InitProcess(void)
 	MyProc->vxid.lxid = InvalidLocalTransactionId;
 	/* databaseId and roleId will be filled in later */
 	MyProc->databaseId = InvalidOid;
+	MyProc->branchSessionId = -1;
 	MyProc->roleId = InvalidOid;
 	MyProc->tempNamespaceId = InvalidOid;
 	MyProc->backendType = MyBackendType;
@@ -684,6 +685,7 @@ InitAuxiliaryProcess(void)
 	MyProc->vxid.procNumber = INVALID_PROC_NUMBER;
 	MyProc->vxid.lxid = InvalidLocalTransactionId;
 	MyProc->databaseId = InvalidOid;
+	MyProc->branchSessionId = -1;
 	MyProc->roleId = InvalidOid;
 	MyProc->tempNamespaceId = InvalidOid;
 	MyProc->backendType = MyBackendType;
@@ -909,6 +911,8 @@ ProcReleaseLocks(bool isCommit)
 	LockReleaseAll(DEFAULT_LOCKMETHOD, !isCommit);
 	/* Release transaction-level advisory locks */
 	LockReleaseAll(USER_LOCKMETHOD, false);
+	/* Native fences survive abort; partial startup also owns transaction locks. */
+	LockReleaseAll(NATIVE_LOCKMETHOD, false);
 }
 
 

@@ -2,7 +2,8 @@
 
 Developer-beta continuation: [approved checkpoints](DEVELOPER_BETA_PLAN.md).
 [Milestone 6](MILESTONE_6.md) adds authenticated branch-bound roles;
-milestones 7–10 remain planned.
+[milestone 7](MILESTONE_7.md) adds safe deletion and storage lifecycle.
+Milestones 8–10 remain planned.
 
 Progress: [milestone 0](MILESTONE_0.md), [milestone 1](MILESTONE_1.md),
 [milestone 2](MILESTONE_2.md), [milestone 3](MILESTONE_3.md),

@@ -1,5 +1,9 @@
 # Persistent branch experiment
 
+Latest engine checkpoint: [milestone 7](native_m7/README.md), with authenticated
+branch connections, safe branch deletion, retained storage and DROP/TRUNCATE.
+The runnable app fixture below remains useful for the earlier SQL subset.
+
 Native milestone 5 provides a runnable web-app MVP on the modified
 server: branch-local public tables, nullable column additions, primary/unique
 keys, and isolated data with writable main and shared unchanged storage.

@@ -97,16 +97,26 @@ admission(LOCKMODE mode)
 {
 	LOCKTAG tag;
 
+	if (BranchLifecycleEnabled && MyProcPort != NULL && BranchLifecycleSessionId() < 0)
+		ereport(FATAL, (errcode(ERRCODE_INVALID_AUTHORIZATION_SPECIFICATION), errmsg("reconnect after native lifecycle initialization")));
 	if (!BranchSessionAuthorized())
 		ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
 						errmsg("native branches require a bound login or a superuser")));
 	if (IsParallelWorker() || IsolationUsesXactSnapshot())
 		unsupported("parallel execution or isolation above READ COMMITTED");
 	SET_LOCKTAG_ADVISORY(tag, MyDatabaseId, 0x42524e43, 0, 1);
+	tag.locktag_lockmethodid = NATIVE_LOCKMETHOD;
 	if (mode == ExclusiveLock && !LockHeldByMe(&tag, ExclusiveLock, false) && LockHeldByMe(&tag, ShareLock, false))
 		unsupported("fork after accessing branch tables in the same transaction");
 	if (!LockHeldByMe(&tag, mode, true))
+		{
 		LockAcquire(&tag, mode, false, false);
+		if (BranchLifecycleEnabled && mode == ShareLock)
+		{
+			AcceptInvalidationMessages();
+			BranchCatalogPrepare();
+		}
+	}
 }
 
 /* Explicit snapshots prevent SPI from accidentally replacing an outer scan's
@@ -173,6 +183,7 @@ writer_lock(BranchContext b)
 	LOCKTAG tag;
 
 	SET_LOCKTAG_ADVISORY(tag, MyDatabaseId, 0x42524e43, (uint32) b.id, 2);
+	tag.locktag_lockmethodid = NATIVE_LOCKMETHOD;
 	if (!LockHeldByMe(&tag, ExclusiveLock, false))
 		LockAcquire(&tag, ExclusiveLock, false, false);
 }
@@ -648,6 +659,11 @@ BranchGuardUtility(Node *node)
 	if (BranchCatalogInternal) return;
 	if (!IsTransactionState() || IsAbortedTransactionBlockState()) return;
 	/* Administrative bootstrap metadata always uses ordinary heap storage. */
+	if (superuser() && IsA(node, CreateSeqStmt))
+	{
+		RangeVar *rv = ((CreateSeqStmt *) node)->sequence;
+		if (rv->schemaname && strcmp(rv->schemaname, "branch_native") == 0) return;
+	}
 	if (superuser() && (IsA(node, IndexStmt) || IsA(node, AlterTableStmt)))
 	{
 		RangeVar *rv = IsA(node, IndexStmt) ? ((IndexStmt *) node)->relation : ((AlterTableStmt *) node)->relation;
@@ -712,6 +728,7 @@ BranchGuardUtility(Node *node)
 
 		SPI_connect(); b=context(); SPI_finish();
 		SET_LOCKTAG_ADVISORY(tag,MyDatabaseId,0x42524e43,(uint32)b.id,3);
+		tag.locktag_lockmethodid = NATIVE_LOCKMETHOD;
 		if (!LockHeldByMe(&tag,ExclusiveLock,false)) LockAcquire(&tag,ExclusiveLock,false,false);
 		AcceptInvalidationMessages();
 		BranchCatalogPrepare();
@@ -739,50 +756,67 @@ BranchGuardUtility(Node *node)
 Datum
 branch_gc(PG_FUNCTION_ARGS)
 {
-	int64 count = 0;
+	int64		count = 0;
 	MemoryContext caller = CurrentMemoryContext;
-	uint64 i, n;
-	typedef struct DeadVersion { int64 id; Oid relid; int64 generation; ItemPointerData tid; bool deleted; } DeadVersion;
+	uint64		i,
+				n;
+	typedef struct DeadVersion
+	{
+		int64		id;
+		Oid			relid;
+		int64		generation;
+		ItemPointerData tid;
+		bool		deleted;
+	} DeadVersion;
 	DeadVersion *dead;
 
 	BranchMaintenanceAdmission();
 	BranchCatalogPrepare();
-	SPI_connect();
-	query("SELECT v.id,v.relid,v.generation,v.block,v.offset_no,v.deleted FROM branch_native.versions v "
-		  "WHERE NOT EXISTS (SELECT FROM branch_native.branches b WHERE v.id=(SELECT w.id "
-		  "FROM branch_native.versions w WHERE w.relid=v.relid AND w.generation=v.generation "
-		  "AND w.root_id=v.root_id AND (w.branch=b.id OR (w.branch=0 AND w.id<=b.cutoff)) "
-		  "ORDER BY (w.branch=b.id) DESC,w.id DESC LIMIT 1)) ORDER BY v.id",GetLatestSnapshot(),true);
-	n=SPI_processed;
-	dead=MemoryContextAllocZero(caller,sizeof(DeadVersion)*Max(n,1));
-	for(i=0;i<n;i++)
-	{
-		HeapTuple t=SPI_tuptable->vals[i];TupleDesc d=SPI_tuptable->tupdesc;bool isnull;
-		dead[i].id=number(t,d,1);
-		dead[i].relid=DatumGetObjectId(SPI_getbinval(t,d,2,&isnull));
-		dead[i].generation=number(t,d,3);
-		dead[i].deleted=DatumGetBool(SPI_getbinval(t,d,6,&isnull));
-		ItemPointerSet(&dead[i].tid,(BlockNumber)number(t,d,4),(OffsetNumber)number(t,d,5));
-	}
-	SPI_finish();
 	BranchCatalogBypass(true);
 	PG_TRY();
 	{
-		for(i=0;i<n;i++)
+		SPI_connect();
+		query(psprintf("SELECT v.id,v.relid,v.generation,v.block,v.offset_no,v.deleted FROM branch_native.versions v "
+					   "WHERE NOT EXISTS (SELECT FROM branch_native.branches b WHERE b.name IS NOT NULL %s AND v.id=(SELECT w.id "
+					   "FROM branch_native.versions w WHERE w.relid=v.relid AND w.generation=v.generation "
+					   "AND w.root_id=v.root_id AND (w.branch=b.id OR (w.branch=0 AND w.id<=b.cutoff)) "
+					   "ORDER BY (w.branch=b.id) DESC,w.id DESC LIMIT 1)) ORDER BY v.id", BranchLifecycleEnabled ?
+					   "AND EXISTS(SELECT FROM branch_native.objects o JOIN pg_class c ON c.oid=o.object "
+					   "WHERE o.catalog='pg_class'::regclass AND o.owner=b.id AND o.source=v.relid AND c.relfilenode::bigint=v.generation "
+					   "AND NOT EXISTS(SELECT FROM branch_native.retired r WHERE r.catalog=o.catalog AND r.object=o.object))" : ""), GetLatestSnapshot(), true);
+		n = SPI_processed;
+		dead = MemoryContextAllocZero(caller, sizeof(DeadVersion) * Max(n, 1));
+		for (i = 0; i < n; i++)
 		{
-			if(!dead[i].deleted)
+			HeapTuple	t = SPI_tuptable->vals[i];
+			TupleDesc	d = SPI_tuptable->tupdesc;
+			bool		isnull;
+
+			dead[i].id = number(t, d, 1);
+			dead[i].relid = DatumGetObjectId(SPI_getbinval(t, d, 2, &isnull));
+			dead[i].generation = number(t, d, 3);
+			dead[i].deleted = DatumGetBool(SPI_getbinval(t, d, 6, &isnull));
+			ItemPointerSet(&dead[i].tid, (BlockNumber) number(t, d, 4), (OffsetNumber) number(t, d, 5));
+		}
+		SPI_finish();
+		for (i = 0; i < n; i++)
+		{
+			if (!dead[i].deleted)
 			{
-				Relation r=table_open(dead[i].relid,RowExclusiveLock);
+				Relation	r = table_open(dead[i].relid, RowExclusiveLock);
 				TM_FailureData failure;
-				TM_Result result;
-				if ((int64)r->rd_locator.relNumber!=dead[i].generation) elog(ERROR,"branch GC storage generation mismatch");
-				result=heap_delete(r,&dead[i].tid,GetCurrentCommandId(true),
-					TABLE_DELETE_KEEP_TOAST|TABLE_DELETE_NO_LOGICAL,InvalidSnapshot,true,&failure);
-				if(result!=TM_Ok) elog(ERROR,"branch GC physical delete failed: %d",result);
-				table_close(r,NoLock);
+				TM_Result	result;
+
+				if ((int64) r->rd_locator.relNumber != dead[i].generation)
+					elog(ERROR, "branch GC storage generation mismatch");
+				result = heap_delete(r, &dead[i].tid, GetCurrentCommandId(true),
+									 TABLE_DELETE_KEEP_TOAST | TABLE_DELETE_NO_LOGICAL, InvalidSnapshot, true, &failure);
+				if (result != TM_Ok)
+					elog(ERROR, "branch GC physical delete failed: %d", result);
+				table_close(r, NoLock);
 			}
 			SPI_connect();
-			query(psprintf("DELETE FROM branch_native.versions WHERE id=" INT64_FORMAT,dead[i].id),GetLatestSnapshot(),false);
+			query(psprintf("DELETE FROM branch_native.versions WHERE id=" INT64_FORMAT, dead[i].id), GetLatestSnapshot(), false);
 			SPI_finish();
 			count++;
 		}
@@ -855,4 +889,26 @@ BranchMaintenanceAdmission(void)
 		ereport(ERROR,(errcode(ERRCODE_READ_ONLY_SQL_TRANSACTION),errmsg("native maintenance requires a writable primary")));
 	if (!BranchCatalogEnabled || strcmp(BranchName,"main")!=0) unsupported("maintenance outside catalog-enabled main");
 	admission(ExclusiveLock);
+}
+
+/*
+ * DDL may upgrade its own admission lock without waiting behind another
+ * upgrader. A conflict aborts with 40001 rather than creating a lock cycle.
+ */
+void
+BranchLifecycleAdmission(void)
+{
+	LOCKTAG		tag;
+
+	if (XactReadOnly || RecoveryInProgress())
+		ereport(ERROR, (errcode(ERRCODE_READ_ONLY_SQL_TRANSACTION), errmsg("native lifecycle requires a writable primary")));
+	SET_LOCKTAG_ADVISORY(tag, MyDatabaseId, 0x42524e43, 0, 1);
+	tag.locktag_lockmethodid = NATIVE_LOCKMETHOD;
+	if (LockHeldByMe(&tag, ShareLock, false) && !LockHeldByMe(&tag, ExclusiveLock, false))
+	{
+		if (LockAcquire(&tag, ExclusiveLock, false, true) == LOCKACQUIRE_NOT_AVAIL)
+			ereport(ERROR, (errcode(ERRCODE_T_R_SERIALIZATION_FAILURE), errmsg("retry transaction to obtain native lifecycle admission")));
+	}
+	else
+		admission(ExclusiveLock);
 }

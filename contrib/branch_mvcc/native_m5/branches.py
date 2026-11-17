@@ -21,9 +21,12 @@ def connection_url(db, branch):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     arguments(parser)
-    parser.add_argument('command', choices=('create', 'list', 'url'))
+    parser.add_argument('command', choices=('create', 'list', 'url', 'drop'))
     parser.add_argument('name', nargs='?', type=branch_name)
+    parser.add_argument('--force', action='store_true', help='disconnect branch sessions before deletion')
     args = parser.parse_args()
+    if args.force and args.command != 'drop':
+        parser.error('--force is only valid with drop')
     if args.branch != 'main':
         parser.error('branch administration connects through main')
     if args.command != 'list' and args.name is None:
@@ -33,8 +36,11 @@ if __name__ == '__main__':
             if args.command == 'create':
                 db.execute('SELECT branch_create($1)', (args.name,))
                 print(json.dumps({'created': args.name, 'url': connection_url(db, args.name)}))
+            elif args.command == 'drop':
+                db.execute('SELECT branch_drop($1,$2)', (args.name, args.force))
+                print(json.dumps({'dropped': args.name}))
             elif args.command == 'list':
-                print(json.dumps(db.execute('SELECT id,name,cutoff FROM branch_native.branches ORDER BY id')))
+                print(json.dumps(db.execute('SELECT id,name,cutoff FROM branch_native.branches WHERE name IS NOT NULL ORDER BY id')))
             else:
                 if not db.execute('SELECT name FROM branch_native.branches WHERE name=$1', (args.name,)):
                     raise ValueError('branch does not exist')

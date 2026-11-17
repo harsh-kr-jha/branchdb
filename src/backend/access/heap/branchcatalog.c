@@ -88,7 +88,7 @@ object_visible(Oid catalog, Oid object)
 	e = lookup(catalog, object);
 	/* Unknown user objects are hidden, never treated as globally visible.
 	 * Another branch may have just committed DDL after our metadata snapshot. */
-	return e && (e->owner < 0 || e->owner == branch_id);
+	return e && (e->owner < 0 || (e->owner == branch_id && !BranchObjectRetired(catalog, object)));
 }
 
 Oid
@@ -158,9 +158,9 @@ BranchCatalogVisible(HeapTuple tuple)
 			bool managed = d->classid == RelationRelationId || d->classid == TypeRelationId || d->classid == ConstraintRelationId;
 			bool refmanaged = d->refclassid == RelationRelationId || d->refclassid == TypeRelationId || d->refclassid == ConstraintRelationId;
 
-			if (e && e->owner >= 0) return e->owner == branch_id;
+			if (e && e->owner >= 0) return object_visible(d->classid, d->objid);
 			if (!e && managed && d->objid >= FirstNormalObjectId) return false;
-			if (r && r->owner >= 0) return r->owner == branch_id;
+			if (r && r->owner >= 0) return object_visible(d->refclassid, d->refobjid);
 			if (!r && refmanaged && d->refobjid >= FirstNormalObjectId) return false;
 			return true;
 		}
@@ -243,6 +243,7 @@ BranchCatalogPrepare(void)
 					 DatumGetInt64(SPI_getbinval(t,d,3,&n)), DatumGetObjectId(SPI_getbinval(t,d,4,&n)));
 		}
 		SPI_finish();
+		BranchLifecycleRefresh();
 		if (pushed) PopActiveSnapshot();
 		if (previous_context) MemoryContextDelete(previous_context);
 		branch_id = next_branch;

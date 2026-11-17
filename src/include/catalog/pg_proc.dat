@@ -914,6 +914,13 @@
   prosrc => 'heap_tableam_handler' },
 
 # Experimental branch heap (local prototype OIDs).
+{ oid => '8917', descr => 'drop a native database branch',
+  proname => 'branch_drop', provolatile => 'v', proparallel => 'u',
+  prorettype => 'void', proargtypes => 'text bool', prosrc => 'branch_drop',
+  pronargdefaults => '1', proargdefaults => '{false}' },
+{ oid => '8918', descr => 'reclaim retired native catalog descriptors',
+  proname => 'branch_cleanup', provolatile => 'v', proparallel => 'u',
+  prorettype => 'int8', proargtypes => '', prosrc => 'branch_cleanup' },
 { oid => '8915', descr => 'collect unreachable native branch TOAST values',
   proname => 'branch_gc_toast', provolatile => 'v', proparallel => 'u',
   prorettype => 'int8', proargtypes => '', prosrc => 'branch_gc_toast' },

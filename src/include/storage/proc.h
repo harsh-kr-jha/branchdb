@@ -206,6 +206,7 @@ typedef struct PGPROC
 
 	/* These fields are zero while a backend is still starting up: */
 	Oid			databaseId;		/* OID of database this backend is using */
+	int64		branchSessionId; /* immutable native branch; -1 when unenrolled */
 	Oid			roleId;			/* OID of role using this backend */
 
 	Oid			tempNamespaceId;	/* OID of temp schema this backend is

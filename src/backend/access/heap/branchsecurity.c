@@ -73,15 +73,21 @@ BranchSecurityStartup(void)
 	PushActiveSnapshot(GetTransactionSnapshot());
 	SPI_connect();
 	BranchInternalQuery("SELECT version FROM branch_native.format", NULL, true);
-	if (SPI_processed != 1 || DatumGetInt32(SPI_getbinval(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, 1, &isnull)) != 1)
+	if (SPI_processed != 1 || DatumGetInt32(SPI_getbinval(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, 1, &isnull)) != (OidIsValid(get_relname_relid("storage", ns)) ? 2 : 1))
 		ereport(FATAL, (errmsg("incompatible native branch metadata format")));
 	if (superuser_arg(GetAuthenticatedUserId()))
 	{
+		if (OidIsValid(get_relname_relid("storage", ns)))
+		{
+			BranchInternalQuery(psprintf("SELECT id FROM branch_native.branches WHERE name=%s", quote_literal_cstr(BranchName)), NULL, true);
+			if (SPI_processed != 1) ereport(FATAL, (errmsg("native branch does not exist")));
+			BranchLifecycleSession(DatumGetInt64(SPI_getbinval(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, 1, &isnull)));
+		}
 		SPI_finish();
 		PopActiveSnapshot();
 		return;
 	}
-	BranchInternalQuery(psprintf("SELECT b.name FROM branch_native.roles r JOIN branch_native.branches b ON b.id=r.branch WHERE r.role=%u", GetAuthenticatedUserId()), NULL, true);
+	BranchInternalQuery(psprintf("SELECT b.name,b.id FROM branch_native.roles r JOIN branch_native.branches b ON b.id=r.branch WHERE b.name IS NOT NULL AND r.role=%u", GetAuthenticatedUserId()), NULL, true);
 	if (SPI_processed != 1)
 		ereport(FATAL, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE), errmsg("login role is not bound to a native branch")));
 	name = MemoryContextStrdup(TopMemoryContext, TextDatumGetCString(SPI_getbinval(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, 1, &isnull)));
@@ -90,6 +96,8 @@ BranchSecurityStartup(void)
 		ereport(FATAL, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE), errmsg("requested branch does not match login role binding")));
 	SetConfigOption("branch", name, PGC_BACKEND, PGC_S_OVERRIDE);
 	pfree(name);
+	if (OidIsValid(get_relname_relid("storage", ns)))
+		BranchLifecycleSession(DatumGetInt64(SPI_getbinval(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, 2, &isnull)));
 	bound_session = true;
 	SPI_finish();
 	PopActiveSnapshot();

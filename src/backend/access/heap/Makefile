@@ -13,6 +13,7 @@ top_builddir = ../../../..
 include $(top_builddir)/src/Makefile.global
 
 OBJS = \
+	branchlifecycle.o \
 	branchsecurity.o \
 	branchmaintenance.o \
 	branchcatalog.o \

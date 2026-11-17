@@ -4339,3 +4339,45 @@ ProcessRepackMessage(StringInfo msg)
 				 msgtype, msg->len);
 	}
 }
+
+/*
+ * Retain both descriptors and both files when native TRUNCATE installs a new
+ * generation. Core swap logic also moves TOAST ownership/dependencies.
+ */
+void
+BranchSwapRelationFiles(Oid first, Oid second)
+{
+	Oid			mapped[4] = {InvalidOid};
+	Relation	previous = relation_open(first, NoLock);
+	TransactionId previous_frozen = previous->rd_rel->relfrozenxid;
+	MultiXactId previous_multi = previous->rd_rel->relminmxid;
+	bool		is_index = previous->rd_rel->relkind == RELKIND_INDEX;
+	Relation	fresh = relation_open(second, NoLock);
+	TransactionId frozen = fresh->rd_rel->relfrozenxid;
+	MultiXactId multi = fresh->rd_rel->relminmxid;
+
+	relation_close(fresh, NoLock);
+	relation_close(previous, NoLock);
+	swap_relation_files(first, second, false, false, true, frozen, multi, mapped);
+	CommandCounterIncrement();
+	Assert(!OidIsValid(mapped[0]));
+
+	/*
+	 * Repack normally discards the second relation immediately. Native
+	 * retention keeps it, so its freeze bounds must still describe the old
+	 * physical file.
+	 */
+	if (!is_index)
+	{
+		Relation	classes = table_open(RelationRelationId, RowExclusiveLock);
+		HeapTuple	tuple = SearchSysCacheCopy1(RELOID, ObjectIdGetDatum(second));
+		Form_pg_class form = (Form_pg_class) GETSTRUCT(tuple);
+
+		form->relfrozenxid = previous_frozen;
+		form->relminmxid = previous_multi;
+		CatalogTupleUpdate(classes, &tuple->t_self, tuple);
+		heap_freetuple(tuple);
+		table_close(classes, RowExclusiveLock);
+	}
+	CommandCounterIncrement();
+}

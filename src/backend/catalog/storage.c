@@ -18,6 +18,7 @@
  */
 
 #include "postgres.h"
+#include "access/branchheap.h"
 
 #include "access/visibilitymap.h"
 #include "access/xact.h"
@@ -207,6 +208,8 @@ void
 RelationDropStorage(Relation rel)
 {
 	PendingRelDelete *pending;
+
+	if (!BranchStorageMayUnlink(rel)) return;
 
 	/* Add the relation to the list of stuff to delete at commit */
 	pending = (PendingRelDelete *)

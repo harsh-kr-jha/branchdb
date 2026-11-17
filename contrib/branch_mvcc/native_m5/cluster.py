@@ -17,8 +17,9 @@ HERE = Path(__file__).resolve().parent
 
 
 class Cluster:
-    def __init__(self, bindir, autovacuum=False):
+    def __init__(self, bindir, autovacuum=False, setup=None):
         self.bindir = Path(bindir).resolve()
+        self.setup = Path(setup) if setup else HERE/'../native_m3/setup.sql'
         self.temp = tempfile.TemporaryDirectory(prefix='branch-app-', dir='/tmp')
         self.root = Path(self.temp.name)
         self.data = self.root/'data'
@@ -34,15 +35,19 @@ class Cluster:
             self.env.pop(key, None)
 
     def command(self, program, *args):
-        return subprocess.run([str(self.bindir/program), *map(str, args)], env=self.env,
-                              capture_output=True, text=True, check=True, timeout=40)
+        try:
+            return subprocess.run([str(self.bindir/program), *map(str, args)], env=self.env,
+                                  capture_output=True, text=True, check=True, timeout=40)
+        except subprocess.CalledProcessError as error:
+            print(error.stderr, file=sys.stderr)
+            raise
 
     def __enter__(self):
         try:
             self.command('initdb', '-D', self.data, '-A', 'trust', '--no-locale', '-E', 'UTF8')
             self.start()
             self.command('psql', self.dsn, '-X', '-v', 'ON_ERROR_STOP=1',
-                         '-f', HERE/'../native_m3/setup.sql')
+                         '-f', self.setup)
             return self
         except BaseException:
             self.__exit__(*sys.exc_info())

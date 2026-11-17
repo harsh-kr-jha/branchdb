@@ -25,4 +25,13 @@ extern void BranchSecurityStartup(void);
 extern bool BranchSessionAuthorized(void);
 extern int BranchInternalQuery(const char *sql, Snapshot snapshot, bool readonly);
 
+extern void BranchLifecycleAdmission(void);
+extern bool BranchLifecycleEnabled;
+extern bool BranchObjectRetired(Oid catalog, Oid object);
+extern void BranchLifecycleSession(int64 id);
+extern int64 BranchLifecycleSessionId(void);
+extern bool BranchLifecycleUtility(Node *node);
+extern bool BranchStorageMayUnlink(Relation relation);
+extern void BranchLifecycleRefresh(void);
+
 #endif
