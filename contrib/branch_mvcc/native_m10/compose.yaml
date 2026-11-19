@@ -1,0 +1,17 @@
+services:
+  branchdb:
+    image: branchdb:developer-beta
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - branchdb-data:/var/lib/branchdb
+    tmpfs:
+      - /tmp:mode=1777,size=64m
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    stop_grace_period: 30s
+volumes:
+  branchdb-data:

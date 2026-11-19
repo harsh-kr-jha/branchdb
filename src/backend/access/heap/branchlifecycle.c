@@ -34,6 +34,7 @@
 #include "storage/lmgr.h"
 #include "storage/lwlock.h"
 #include "storage/proc.h"
+#include "storage/procarray.h"
 #include "utils/acl.h"
 #include "utils/builtins.h"
 #include "utils/hsearch.h"
@@ -220,25 +221,28 @@ retire_relation(Oid relid)
 	query(psprintf("INSERT INTO branch_native.cleanup VALUES(%u) ON CONFLICT DO NOTHING", relid), false);
 }
 
+/*
+ * Session fences outlive transactions. Idle sessions have no valid VXID, so
+ * GetLockConflicts() intentionally omits them; use the immutable enrollment
+ * published under ProcArrayLock instead. The startup gate is already fenced.
+ */
 static void
-terminate_sessions(int64 id, LOCKTAG *tag)
+terminate_sessions(int64 id)
 {
-	int			count,
-				i;
-	VirtualTransactionId *holders = GetLockConflicts(tag, ExclusiveLock, &count);
 	List	   *pids = NIL;
 	ListCell   *cell;
+	uint32		i;
 
 	LWLockAcquire(ProcArrayLock, LW_SHARED);
-	for (i = 0; i < count; i++)
+	for (i = 0; i < ProcGlobal->allProcCount; i++)
 	{
-		PGPROC	   *proc = &ProcGlobal->allProcs[holders[i].procNumber];
+		PGPROC	   *proc = GetPGProcByNumber(i);
 
-		if (proc->databaseId == MyDatabaseId && proc->branchSessionId == id && proc->pid > 0)
+		if (proc->databaseId == MyDatabaseId && proc->branchSessionId == id && proc->pid > 0 &&
+			BackendPidGetProcWithLock(proc->pid) == proc)
 			pids = lappend_int(pids, proc->pid);
 	}
 	LWLockRelease(ProcArrayLock);
-	pfree(holders);
 	foreach(cell, pids) (void) kill(lfirst_int(cell), SIGTERM);
 	list_free(pids);
 }
@@ -294,7 +298,7 @@ branch_drop(PG_FUNCTION_ARGS)
 			ereport(ERROR, (errcode(ERRCODE_OBJECT_IN_USE), errmsg("branch has connected sessions"), errhint("Disconnect them or use branch_drop(name, true).")));
 		if (TimestampDifferenceExceeds(started, GetCurrentTimestamp(), 10000))
 			ereport(ERROR, (errcode(ERRCODE_LOCK_NOT_AVAILABLE), errmsg("timed out terminating branch sessions")));
-		terminate_sessions(id, &session);
+		terminate_sessions(id);
 		CHECK_FOR_INTERRUPTS();
 		pg_usleep(10000L);
 	}

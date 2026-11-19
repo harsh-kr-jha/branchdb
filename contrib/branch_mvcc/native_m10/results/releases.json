@@ -1,0 +1,18 @@
+[
+  {
+    "target": "linux-x86_64",
+    "engine": "1e3b415e4c23422a694bb9974541bc3ea0666caf4c09b2b103ec09b7506c9b56",
+    "engine_source_sha256": "392507173cc298ab9f68d773c16e466bb6c6098ff9754b8e843ea765c2bd520e",
+    "source_commit": "tree:392507173cc298ab9f68d773c16e466bb6c6098ff9754b8e843ea765c2bd520e",
+    "archive": "branchdb-developer-beta-linux-x86_64.tar.gz",
+    "sha256": "fa8179fce9b32926222e2af31b5ed7e0972aa2ebd5b67d7bbacab3273dced9a9"
+  },
+  {
+    "target": "macos-arm64",
+    "engine": "3a22750ce12975fb97a4cb3105ef9383db83205fc01840a640f3df0fab819e08",
+    "engine_source_sha256": "392507173cc298ab9f68d773c16e466bb6c6098ff9754b8e843ea765c2bd520e",
+    "source_commit": "44c87bfaa3bbb33365c702939f596efed8ad323c",
+    "archive": "branchdb-developer-beta-macos-arm64.tar.gz",
+    "sha256": "4ee13428e5559de7b54d45603c58c06a72c1d8158ea92c6a92c6216a08f18d67"
+  }
+]

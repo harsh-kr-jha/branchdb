@@ -1,3 +1,6 @@
+Standalone development runtime: [milestone 10](native_m10/README.md), including
+relocatable branchdb packages and a persistent non-root Linux container.
+
 # Persistent branch experiment
 
 Latest engine checkpoint: [milestone 9](native_m9/README.md), with cached catalog

@@ -1,0 +1,3 @@
+ok 243       - tablespace                                846 ms
+1..243
+# All 243 tests passed.

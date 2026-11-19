@@ -1,0 +1,11 @@
+{
+  "checks": [
+    "manifest detects modified payloads and unsafe file modes",
+    "relocation, clean PATH, missing build prefixes and idempotent lifecycle",
+    "SCRAM, private files, role separation, future-table default grants and immutable branch context",
+    "parallel isolated branch writes, cloned identity ownership and post-fork migrations",
+    "connected-session refusal, forced deletion and stale-credential fencing",
+    "PID spoof protection, crash recovery, restart, stop and logs"
+  ],
+  "passed": true
+}

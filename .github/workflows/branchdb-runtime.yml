@@ -1,0 +1,87 @@
+name: BranchDB runtime acceptance
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'contrib/branch_mvcc/**'
+      - 'src/**'
+      - '.github/workflows/branchdb-runtime.yml'
+permissions:
+  contents: read
+jobs:
+  native:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, ubuntu-22.04]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '23.6.1'
+      - name: Build dependencies
+        shell: bash
+        run: |
+          if [[ "$RUNNER_OS" == Linux ]]; then
+            sudo apt-get update
+            sudo apt-get install -y build-essential bison flex zlib1g-dev patchelf python3-venv
+          else
+            brew install bison flex
+            echo "$(brew --prefix bison)/bin" >> "$GITHUB_PATH"
+            echo "$(brew --prefix flex)/bin" >> "$GITHUB_PATH"
+          fi
+      - name: Pinned Python and framework inputs
+        shell: bash
+        run: |
+          python3 -m venv "$RUNNER_TEMP/tools"
+          "$RUNNER_TEMP/tools/bin/pip" install uv==0.11.7
+          "$RUNNER_TEMP/tools/bin/uv" python install 3.13.9 --install-dir "$RUNNER_TEMP/python-input" --no-bin --no-registry
+          python_prefix=$(find "$RUNNER_TEMP/python-input" -maxdepth 1 -type d -name 'cpython-3.13.9-*' -print)
+          echo "PYTHON_PREFIX=$python_prefix" >> "$GITHUB_ENV"
+          python3 -m venv "$RUNNER_TEMP/client"
+          "$RUNNER_TEMP/client/bin/pip" install -r contrib/branch_mvcc/native_m8/requirements.txt
+          npm --prefix contrib/branch_mvcc/native_m8/prisma ci
+      - name: Build the native engine
+        shell: bash
+        run: |
+          if [[ "$RUNNER_OS" == macOS ]]; then export MACOSX_DEPLOYMENT_TARGET=15.0; fi
+          mkdir -p "$RUNNER_TEMP/build" "$RUNNER_TEMP/install"
+          cd "$RUNNER_TEMP/build"
+          "$GITHUB_WORKSPACE/configure" --prefix="$RUNNER_TEMP/install" --without-icu --without-readline CFLAGS=-O2
+          make -j4
+          make install
+          make -C src/test/regress check
+      - name: Earlier engine and framework acceptance
+        shell: bash
+        run: |
+          "$RUNNER_TEMP/client/bin/python" -B contrib/branch_mvcc/native_m9/verify.py \
+            --bindir "$RUNNER_TEMP/install/bin" --logs "$RUNNER_TEMP/engine-logs"
+      - name: Assemble relocatable runtime
+        shell: bash
+        run: |
+          "$RUNNER_TEMP/tools/bin/python" contrib/branch_mvcc/native_m10/build.py \
+            --postgres-prefix "$RUNNER_TEMP/install" --python-prefix "$PYTHON_PREFIX" --output "$RUNNER_TEMP/dist"
+          mkdir -p "$RUNNER_TEMP/driver"
+          tar -xzf "$RUNNER_TEMP"/dist/branchdb-*.tar.gz -C "$RUNNER_TEMP/driver"
+      - name: Dependency-isolated lifecycle and real frameworks
+        shell: bash
+        run: |
+          "$RUNNER_TEMP/driver/branchdb/python/bin/python3" -B contrib/branch_mvcc/native_m10/test.py \
+            --archive "$RUNNER_TEMP"/dist/branchdb-*.tar.gz --hide-prefix "$RUNNER_TEMP/install" --hide-prefix "$PYTHON_PREFIX" \
+            --report "$RUNNER_TEMP/dist/runtime-acceptance.json"
+          "$RUNNER_TEMP/client/bin/python" -B contrib/branch_mvcc/native_m10/frameworks.py \
+            --runtime "$RUNNER_TEMP/driver/branchdb" --hide-prefix "$RUNNER_TEMP/install" --hide-prefix "$PYTHON_PREFIX" \
+            --report "$RUNNER_TEMP/dist/framework-acceptance.json"
+      - name: Linux non-root persistent container
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          python3 contrib/branch_mvcc/native_m10/image.py --archive "$RUNNER_TEMP"/dist/branchdb-*.tar.gz --tag branchdb:ci
+          python3 contrib/branch_mvcc/native_m10/container_test.py --tag branchdb:ci \
+            --client-runtime "$RUNNER_TEMP/driver/branchdb" --report "$RUNNER_TEMP/dist/container-acceptance.json"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: branchdb-${{ runner.os }}-${{ runner.arch }}
+          path: ${{ runner.temp }}/dist/

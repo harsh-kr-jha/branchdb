@@ -1,0 +1,7 @@
+{
+  "checks": [
+    "non-root UID, read-only root, explicit named volume, SCRAM roles and isolated branch writes",
+    "SIGINT fast shutdown and retained credentials/data across container replacement"
+  ],
+  "passed": true
+}

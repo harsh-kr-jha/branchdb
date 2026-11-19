@@ -1,0 +1,7 @@
+{
+  "checks": [
+    "packaged SCRAM Prisma deploy/dev/shadow/introspection/reset, app CRUD, parallel branch apps and main isolation",
+    "packaged SCRAM Django migrations/ORM/parallel branches and isolated reverse migrations"
+  ],
+  "passed": true
+}

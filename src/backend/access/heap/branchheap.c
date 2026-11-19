@@ -836,6 +836,7 @@ BranchGuardUtility(Node *node)
 
 	switch (nodeTag(node))
 	{
+		case T_AlterDefaultPrivilegesStmt:
 		case T_GrantStmt:
 		case T_GrantRoleStmt:
 		case T_CreateRoleStmt:

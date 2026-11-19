@@ -93,5 +93,5 @@ other host activity uncontrolled. Broader SQL support, concurrent maintenance,
 full raw-XID wrap testing and production certification remain outside this
 checkpoint.
 
-Milestone 10, distributable runtime packaging and clean-machine platform
-validation, is next and has not been started.
+Distributable runtime packaging and platform validation are covered in
+[milestone 10](MILESTONE_10.md).
