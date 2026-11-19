@@ -15,6 +15,9 @@
 #include "commands/defrem.h"
 #include "commands/tablecmds.h"
 #include "commands/repack.h"
+#include "commands/sequence.h"
+#include "executor/executor.h"
+#include "utils/rel.h"
 #include "parser/parse_utilcmd.h"
 #include "parser/parse_node.h"
 #include "catalog/namespace.h"
@@ -28,6 +31,7 @@
 #include "miscadmin.h"
 #include "nodes/makefuncs.h"
 #include "storage/lock.h"
+#include "storage/lmgr.h"
 #include "storage/lwlock.h"
 #include "storage/proc.h"
 #include "utils/acl.h"
@@ -47,7 +51,7 @@ typedef struct RetiredKey
 {
 	Oid			catalog;
 	Oid			object;
-} RetiredKey;
+}			RetiredKey;
 static HTAB *retired;
 static MemoryContext retired_context;
 static bool refreshing;
@@ -206,7 +210,8 @@ retire_relation(Oid relid)
 {
 	char	   *graph = psprintf("WITH ids AS (SELECT %u::oid AS oid UNION SELECT indexrelid FROM pg_index WHERE indrelid=%u "
 								 "UNION SELECT reltoastrelid FROM pg_class WHERE oid=%u AND reltoastrelid<>0 "
-								 "UNION SELECT i.indexrelid FROM pg_index i JOIN pg_class c ON c.reltoastrelid=i.indrelid WHERE c.oid=%u) ", relid, relid, relid, relid);
+								 "UNION SELECT i.indexrelid FROM pg_index i JOIN pg_class c ON c.reltoastrelid=i.indrelid WHERE c.oid=%u "
+								 "UNION SELECT objid FROM pg_depend WHERE classid='pg_class'::regclass AND refclassid='pg_class'::regclass AND refobjid=%u AND deptype IN ('a','i')) ", relid, relid, relid, relid, relid);
 
 	query(psprintf("%s INSERT INTO branch_native.retired SELECT 'pg_class'::regclass,oid FROM ids ON CONFLICT DO NOTHING", graph), false);
 	query(psprintf("%s INSERT INTO branch_native.retired SELECT 'pg_type'::regclass,t.oid FROM ids JOIN pg_class c USING(oid) "
@@ -315,7 +320,7 @@ branch_drop(PG_FUNCTION_ARGS)
 			ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("native branch was already deleted")));
 		sync_storage();
 		query(psprintf("SELECT c.oid FROM pg_class c JOIN branch_native.objects o ON o.object=c.oid AND o.catalog='pg_class'::regclass "
-					   "WHERE o.owner=" INT64_FORMAT " AND c.relnamespace='public'::regnamespace AND c.relkind='r' "
+					   "WHERE o.owner=" INT64_FORMAT " AND c.relnamespace='public'::regnamespace AND (c.relkind='r' OR (c.relkind='S' AND NOT EXISTS(SELECT FROM pg_depend d WHERE d.classid='pg_class'::regclass AND d.objid=c.oid AND d.refclassid='pg_class'::regclass AND d.deptype IN ('a','i')))) "
 					   "AND NOT EXISTS(SELECT FROM branch_native.retired r WHERE r.catalog='pg_class'::regclass AND r.object=c.oid)", id), true);
 		n = SPI_processed;
 		tables = MemoryContextAlloc(caller, sizeof(Oid) * Max(n, 1));
@@ -459,7 +464,7 @@ retarget(Oid current, Oid archive, Oid root, RelFileNumber generation)
 }
 
 static void
-truncate_relation(Oid relid)
+replace_generation(Oid relid, bool copy_rows)
 {
 	Relation	old;
 	Oid			holder,
@@ -486,6 +491,34 @@ truncate_relation(Oid relid)
 	PG_TRY();
 	{
 		holder = make_new_heap(relid, old->rd_rel->reltablespace, old->rd_rel->relam, old->rd_rel->relpersistence, AccessExclusiveLock);
+		if (copy_rows)
+		{
+			Relation	destination = table_open(holder, NoLock);
+			Snapshot	snapshot = RegisterSnapshot(GetLatestSnapshot());
+			TableScanDesc scan = table_beginscan(old, snapshot, 0, NULL, 0);
+			TupleTableSlot *slot = table_slot_create(old, NULL);
+			TupleTableSlot *copy = table_slot_create(destination, NULL);
+
+			while (table_scan_getnextslot(scan, ForwardScanDirection, slot))
+			{
+				/*
+				 * Materialize missing attributes before moving generations:
+				 * the empty heap need not carry the source's fast-default
+				 * metadata.
+				 */
+				slot_getallattrs(slot);
+				ExecForceStoreHeapTuple(heap_form_tuple(RelationGetDescr(destination), slot->tts_values, slot->tts_isnull), copy, true);
+				table_tuple_insert(destination, copy, GetCurrentCommandId(true), 0, NULL);
+				ExecClearTuple(copy);
+				ExecClearTuple(slot);
+			}
+			ExecDropSingleTupleTableSlot(slot);
+			ExecDropSingleTupleTableSlot(copy);
+			table_endscan(scan);
+			UnregisterSnapshot(snapshot);
+			table_close(destination, NoLock);
+			CommandCounterIncrement();
+		}
 		foreach(cell, indexes)
 		{
 			Oid			indexid = lfirst_oid(cell),
@@ -515,6 +548,8 @@ truncate_relation(Oid relid)
 		BranchSwapRelationFiles(relid, holder);
 		SPI_connect();
 		retarget(relid, holder, root, generation);
+		if (copy_rows)
+			query(psprintf("UPDATE branch_native.versions SET relid=%u WHERE relid=%u AND generation<>%u", relid, holder, generation), false);
 		retire_relation(holder);
 		SPI_finish();
 		BranchCatalogInternal = false;
@@ -531,16 +566,45 @@ truncate_relation(Oid relid)
 	list_free(indexes);
 }
 
+/*
+ * A destructive schema change or new index gets private storage. Fork itself
+ * remains metadata-only. Copy only the selected logical rows, under admission,
+ * and retain the old generation for siblings and historical tuple layouts.
+ */
+void
+BranchDetachRelation(Oid relid)
+{
+	Relation	rel;
+
+	if (!BranchSchemaEnabled || BranchCatalogInternal)
+		return;
+	rel = table_open(relid, AccessExclusiveLock);
+	if (!object_ownercheck(RelationRelationId, relid, GetUserId()))
+		aclcheck_error(ACLCHECK_NOT_OWNER, OBJECT_TABLE, RelationGetRelationName(rel));
+	CheckTableNotInUse(rel, "ALTER TABLE");
+	table_close(rel, NoLock);
+	BranchLifecycleAdmission();
+	SPI_connect();
+	sync_storage();
+	SPI_finish();
+	replace_generation(relid, true);
+	SPI_connect();
+	sync_storage();
+	SPI_finish();
+	invalidate();
+}
+
 bool
 BranchLifecycleUtility(Node *node)
 {
 	List	   *relations = NIL;
 	ListCell   *cell;
 	bool		truncating = IsA(node, TruncateStmt);
+	List	   *foreign_keys = NIL;
 
 	if (!BranchLifecycleEnabled || BranchCatalogInternal || !IsTransactionState() || IsAbortedTransactionBlockState())
 		return false;
-	if (!truncating && (!IsA(node, DropStmt) || (((DropStmt *) node)->removeType != OBJECT_TABLE && ((DropStmt *) node)->removeType != OBJECT_INDEX)))
+	if (!truncating && (!IsA(node, DropStmt) || (((DropStmt *) node)->removeType != OBJECT_TABLE && ((DropStmt *) node)->removeType != OBJECT_INDEX && !(BranchSchemaEnabled && ((DropStmt *) node)->removeType == OBJECT_SEQUENCE))))
 		return false;
 	if (XactReadOnly)
 		ereport(ERROR, (errcode(ERRCODE_READ_ONLY_SQL_TRANSACTION), errmsg("native lifecycle requires a writable transaction")));
@@ -548,7 +612,7 @@ BranchLifecycleUtility(Node *node)
 	{
 		TruncateStmt *stmt = (TruncateStmt *) node;
 
-		if (stmt->restart_seqs)
+		if (stmt->restart_seqs && !BranchSchemaEnabled)
 			ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("native TRUNCATE RESTART IDENTITY is not implemented")));
 		foreach(cell, stmt->relations)
 		{
@@ -572,6 +636,48 @@ BranchLifecycleUtility(Node *node)
 		}
 	}
 
+	if (BranchSchemaEnabled)
+	{
+		int			i;
+		DropBehavior behavior = truncating ? ((TruncateStmt *) node)->behavior : ((DropStmt *) node)->behavior;
+
+		for (i = 0; i < list_length(relations); i++)
+		{
+			Oid			parent = list_nth_oid(relations, i);
+			List	   *references = NIL,
+					   *constraints = NIL;
+			uint64		j;
+			MemoryContext outer = CurrentMemoryContext;
+
+			SPI_connect();
+			MemoryContextSwitchTo(outer);
+			query(psprintf("SELECT oid,conrelid FROM pg_constraint WHERE contype='f' AND confrelid=%u AND conrelid<>%u", parent, parent), true);
+			MemoryContextSwitchTo(outer);
+			for (j = 0; j < SPI_processed; j++)
+			{
+				constraints = lappend_oid(constraints, DatumGetObjectId(value(SPI_tuptable->vals[j], SPI_tuptable->tupdesc, 1)));
+				references = lappend_oid(references, DatumGetObjectId(value(SPI_tuptable->vals[j], SPI_tuptable->tupdesc, 2)));
+			}
+			SPI_finish();
+			for (j = 0; j < list_length(references); j++)
+			{
+				Oid			child = list_nth_oid(references, j);
+
+				if (list_member_oid(relations, child))
+					continue;
+				if (behavior != DROP_CASCADE)
+					ereport(ERROR, (errcode(ERRCODE_DEPENDENT_OBJECTS_STILL_EXIST), errmsg("native relation is referenced by a foreign key"), errhint("Include referencing tables or use CASCADE.")));
+				LockRelationOid(child, AccessExclusiveLock);
+				if (truncating)
+					relations = list_append_unique_oid(relations, child);
+				else
+					foreign_keys = list_append_unique_oid(foreign_keys, list_nth_oid(constraints, j));
+			}
+			list_free(references);
+			list_free(constraints);
+		}
+	}
+
 	/*
 	 * Resolve and lock names before admission: a reader can already hold a
 	 * relation lock while waiting to enter the native executor.
@@ -583,7 +689,7 @@ BranchLifecycleUtility(Node *node)
 		bool		index = rel->rd_rel->relkind == RELKIND_INDEX;
 		Oid			tableid = index ? IndexGetRelation(id, false) : id;
 
-		if (rel->rd_rel->relnamespace != PG_PUBLIC_NAMESPACE || get_rel_relam(tableid) != BRANCH_HEAP_TABLE_AM_OID ||
+		if (rel->rd_rel->relnamespace != PG_PUBLIC_NAMESPACE || (get_rel_relam(tableid) != BRANCH_HEAP_TABLE_AM_OID && !(BranchSchemaEnabled && !truncating && ((DropStmt *) node)->removeType == OBJECT_SEQUENCE && rel->rd_rel->relkind == RELKIND_SEQUENCE)) ||
 			(truncating && index) || (!truncating && (((DropStmt *) node)->removeType == OBJECT_INDEX) != index))
 			ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("native DROP/TRUNCATE supports branch-owned public tables and indexes only")));
 		if (truncating)
@@ -600,6 +706,25 @@ BranchLifecycleUtility(Node *node)
 	}
 	BranchLifecycleAdmission();
 	BranchCatalogPrepare();
+	foreach(cell, foreign_keys)
+	{
+		ObjectAddress address;
+
+		ObjectAddressSet(address, ConstraintRelationId, lfirst_oid(cell));
+		performDeletion(&address, DROP_CASCADE, 0);
+		CommandCounterIncrement();
+	}
+	if (truncating && BranchSchemaEnabled && ((TruncateStmt *) node)->restart_seqs)
+	{
+		foreach(cell, relations)
+		{
+			List	   *sequences = getOwnedSequences(lfirst_oid(cell));
+			ListCell   *sequence;
+
+			foreach(sequence, sequences) ResetSequence(lfirst_oid(sequence));
+			list_free(sequences);
+		}
+	}
 	BranchCatalogBypass(true);
 	PG_TRY();
 	{
@@ -614,7 +739,22 @@ BranchLifecycleUtility(Node *node)
 			{
 				/* Catalog updates must retain branch-aware uniqueness checks. */
 				BranchCatalogBypass(false);
-				truncate_relation(id);
+				replace_generation(id, false);
+				BranchCatalogBypass(true);
+			}
+			else if (BranchSchemaEnabled && ((DropStmt *) node)->removeType == OBJECT_SEQUENCE)
+			{
+				ObjectAddress address;
+
+				/*
+				 * Sequence files are private from birth. Core dependency
+				 * handling preserves RESTRICT/CASCADE and identity ownership
+				 * semantics.
+				 */
+				BranchCatalogBypass(false);
+				ObjectAddressSet(address, RelationRelationId, id);
+				performDeletion(&address, ((DropStmt *) node)->behavior, 0);
+				CommandCounterIncrement();
 				BranchCatalogBypass(true);
 			}
 			else

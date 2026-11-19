@@ -2,6 +2,7 @@
 
 backend_sources += files(
   'branchlifecycle.c',
+  'branchschema.c',
   'branchsecurity.c',
   'branchmaintenance.c',
   'branchcatalog.c',

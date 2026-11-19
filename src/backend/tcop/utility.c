@@ -578,7 +578,7 @@ standard_ProcessUtility(PlannedStmt *pstmt,
 		if(qc) SetQueryCompletion(qc,CMDTAG_VACUUM,0);
 		return;
 	}
-	if (BranchLifecycleUtility(parsetree))
+	if (BranchSchemaUtility(parsetree) || BranchLifecycleUtility(parsetree))
 	{
 		if (qc) SetQueryCompletion(qc, CreateCommandTag(parsetree), 0);
 		return;

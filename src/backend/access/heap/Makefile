@@ -14,6 +14,7 @@ include $(top_builddir)/src/Makefile.global
 
 OBJS = \
 	branchlifecycle.o \
+	branchschema.o \
 	branchsecurity.o \
 	branchmaintenance.o \
 	branchcatalog.o \

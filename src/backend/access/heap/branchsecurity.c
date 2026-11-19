@@ -73,7 +73,7 @@ BranchSecurityStartup(void)
 	PushActiveSnapshot(GetTransactionSnapshot());
 	SPI_connect();
 	BranchInternalQuery("SELECT version FROM branch_native.format", NULL, true);
-	if (SPI_processed != 1 || DatumGetInt32(SPI_getbinval(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, 1, &isnull)) != (OidIsValid(get_relname_relid("storage", ns)) ? 2 : 1))
+	if (SPI_processed != 1 || DatumGetInt32(SPI_getbinval(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, 1, &isnull)) != (OidIsValid(get_relname_relid("schema_features", ns)) ? 3 : (OidIsValid(get_relname_relid("storage", ns)) ? 2 : 1)))
 		ereport(FATAL, (errmsg("incompatible native branch metadata format")));
 	if (superuser_arg(GetAuthenticatedUserId()))
 	{

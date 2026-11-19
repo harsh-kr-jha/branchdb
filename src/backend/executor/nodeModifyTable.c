@@ -53,6 +53,7 @@
 
 #include "postgres.h"
 
+#include "access/branchheap.h"
 #include "access/htup_details.h"
 #include "access/tableam.h"
 #include "access/tupconvert.h"
@@ -1144,6 +1145,8 @@ ExecInsert(ModifyTableContext *context,
 			 * this an infinite loop.
 			 */
 	vlock:
+			if (resultRelationDesc->rd_rel->relam == BRANCH_HEAP_TABLE_AM_OID)
+				BranchPrepareWrite(resultRelationDesc);
 			CHECK_FOR_INTERRUPTS();
 			specConflict = false;
 			if (!ExecCheckIndexConstraints(resultRelInfo, slot, estate,
@@ -5117,7 +5120,7 @@ ExecInitModifyTable(ModifyTable *node, EState *estate, int eflags)
 		/* Fail closed for experimental branch operations before executor
 		 * optimizations can bypass AM speculative-insert callbacks. */
 		if (resultRelInfo->ri_RelationDesc->rd_rel->relam == BRANCH_HEAP_TABLE_AM_OID &&
-			(node->onConflictAction != ONCONFLICT_NONE || operation == CMD_MERGE))
+			((node->onConflictAction != ONCONFLICT_NONE && !BranchSchemaEnabled) || operation == CMD_MERGE))
 			ereport(ERROR,
 					(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
 					 errmsg("branch_heap milestone 1 does not support ON CONFLICT or MERGE")));

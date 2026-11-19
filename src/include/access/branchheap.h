@@ -8,6 +8,14 @@
 extern PGDLLIMPORT char *BranchName;
 extern void BranchGuardUtility(Node *node);
 extern bool BranchCatalogEnabled;
+extern bool BranchSchemaEnabled;
+extern void BranchPrepareWrite(Relation rel);
+extern void BranchSequenceAccess(Oid relation);
+extern void BranchSchemaAdmission(void);
+extern bool BranchSchemaGuard(Node *node);
+extern bool BranchSchemaUtility(Node *node);
+extern void BranchDetachRelation(Oid relid);
+extern void BranchValidateDefault(Relation rel, Node *expr);
 extern bool BranchCatalogInternal;
 extern void BranchCatalogPrepare(void);
 extern bool BranchCatalogScoped(Oid relid);

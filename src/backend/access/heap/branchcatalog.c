@@ -1,6 +1,6 @@
 /* Experimental branch-owned catalog identities and retained storage aliases.
  * Schema metadata is duplicated; unchanged user tuples/index pages are shared.
- * Only the guarded CREATE TABLE / nullable ADD COLUMN subset is supported. */
+ * Schema commands are explicitly guarded; format 3 enables framework SQL. */
 #include "postgres.h"
 #include "access/branchheap.h"
 #include "access/heapam.h"
@@ -17,12 +17,15 @@
 #include "catalog/pg_index.h"
 #include "catalog/pg_namespace_d.h"
 #include "catalog/pg_type.h"
+#include "catalog/pg_sequence.h"
+#include "catalog/pg_trigger.h"
 #include "catalog/storage.h"
 #include "executor/spi.h"
 #include "commands/defrem.h"
 #include "miscadmin.h"
 #include "nodes/parsenodes.h"
 #include "nodes/makefuncs.h"
+#include "nodes/nodeFuncs.h"
 #include "parser/parse_type.h"
 #include "storage/lock.h"
 #include "utils/builtins.h"
@@ -42,6 +45,7 @@ catalog_query(const char *sql, bool readonly, long count)
 }
 
 bool BranchCatalogEnabled = false;
+bool BranchSchemaEnabled = false;
 bool BranchCatalogInternal = false;
 static bool loading;
 static bool bypass;
@@ -111,7 +115,7 @@ BranchCatalogScoped(Oid relid)
 	{
 		case RelationRelationId: case TypeRelationId: case AttributeRelationId:
 		case IndexRelationId: case ConstraintRelationId: case DependRelationId:
-		case AttrDefaultRelationId: case DescriptionRelationId:
+		case AttrDefaultRelationId: case DescriptionRelationId: case SequenceRelationId: case TriggerRelationId:
 			return true;
 		default:
 			return false;
@@ -134,6 +138,14 @@ BranchCatalogVisible(HeapTuple tuple)
 		{
 			Form_pg_type t = (Form_pg_type) GETSTRUCT(tuple);
 			return t->typnamespace != PG_PUBLIC_NAMESPACE || object_visible(TypeRelationId, t->oid);
+		}
+		case SequenceRelationId:
+			return object_visible(RelationRelationId,((Form_pg_sequence) GETSTRUCT(tuple))->seqrelid);
+		case TriggerRelationId:
+		{
+			Form_pg_trigger trigger=(Form_pg_trigger)GETSTRUCT(tuple);
+			return object_visible(RelationRelationId,trigger->tgrelid) &&
+				(!OidIsValid(trigger->tgconstraint) || object_visible(ConstraintRelationId,trigger->tgconstraint));
 		}
 		case AttributeRelationId:
 			return object_visible(RelationRelationId, ((Form_pg_attribute) GETSTRUCT(tuple))->attrelid);
@@ -188,6 +200,7 @@ BranchCatalogPrepare(void)
 	if (!OidIsValid(ns) || !OidIsValid(get_relname_relid("objects", ns)))
 		return;
 	owners_oid = get_relname_relid("objects", ns);
+	BranchSchemaEnabled = OidIsValid(get_relname_relid("schema_features", ns));
 	loading = true;
 	PG_TRY();
 	{
@@ -309,84 +322,176 @@ BranchCatalogInserted(Relation rel, HeapTuple tuple)
 	table_close(meta, RowExclusiveLock);
 }
 
+/* Fork DDL is replayed by the administrator. Keep default expressions within
+ * audited built-ins rather than executing caller-defined functions there. */
+static bool
+unsafe_default(Node *node, void *context)
+{
+	if (!node)
+		return false;
+	if (IsA(node, FuncCall))
+	{
+		FuncCall   *call = (FuncCall *) node;
+		const char *name = strVal(llast(call->funcname));
+
+		if (list_length(call->funcname) > 2 || (list_length(call->funcname) == 2 && strcmp(strVal(linitial(call->funcname)), "pg_catalog") != 0))
+			return true;
+		if (strcmp(name, "now") && strcmp(name, "statement_timestamp") && strcmp(name, "transaction_timestamp") && strcmp(name, "nextval") && strcmp(name, "gen_random_uuid"))
+			return true;
+	}
+	if (IsA(node, SubLink) || IsA(node, ColumnRef))
+		return true;
+	return raw_expression_tree_walker(node, unsafe_default, context);
+}
+
+static void
+validate_constraint(Constraint *constraint)
+{
+	if (constraint->deferrable && constraint->contype != CONSTR_FOREIGN)
+		reject("deferred unique constraints");
+	if (constraint->contype == CONSTR_FOREIGN)
+	{
+		RangeVar   *reference = constraint->pktable;
+		Oid			id;
+
+		if (reference->schemaname && strcmp(reference->schemaname, "public"))
+			reject("foreign keys outside public native tables");
+		id = RangeVarGetRelid(reference, AccessShareLock, true);
+		if (OidIsValid(id) && (get_rel_namespace(id) != PG_PUBLIC_NAMESPACE || get_rel_relam(id) != BRANCH_HEAP_TABLE_AM_OID))
+			reject("foreign keys outside public native tables");
+	}
+}
+
 static void
 validate_column(ColumnDef *c, bool adding)
 {
-	ListCell *lc;
-	Oid typid;
-	int32 typmod;
-	HeapTuple t;
+	ListCell   *lc;
+	Oid			typid;
+	int32		typmod;
+	HeapTuple	t;
 
-	if (c->raw_default || c->cooked_default || c->identity || c->generated || c->collClause || c->storage_name || c->compression)
+	if (BranchSchemaEnabled && unsafe_default(c->raw_default, NULL))
+		reject("default expressions outside audited built-ins");
+	if ((!BranchSchemaEnabled && (c->raw_default || c->cooked_default || c->identity)) || c->generated || c->collClause || c->storage_name || c->compression)
 		reject("defaults, identity/generated columns, custom storage/compression or collations");
-	if (adding && c->is_not_null) reject("ADD COLUMN NOT NULL");
+	if (adding && c->is_not_null && !BranchSchemaEnabled)
+		reject("ADD COLUMN NOT NULL");
 	foreach(lc, c->constraints)
 	{
 		Constraint *con = lfirst_node(Constraint, lc);
-		if (adding && con->contype != CONSTR_NULL) reject("non-nullable or constrained ADD COLUMN");
-		if (con->contype == CONSTR_NOTNULL && con->conname) reject("custom-named NOT NULL constraints");
-		if (con->deferrable || (con->contype != CONSTR_NULL && con->contype != CONSTR_NOTNULL &&
-			con->contype != CONSTR_PRIMARY && con->contype != CONSTR_UNIQUE)) reject("column constraints beyond immediate primary/unique/not-null");
+
+		if (BranchSchemaEnabled && (con->contype == CONSTR_ATTR_DEFERRABLE || con->contype == CONSTR_ATTR_NOT_DEFERRABLE || con->contype == CONSTR_ATTR_DEFERRED || con->contype == CONSTR_ATTR_IMMEDIATE))
+			continue;
+		if (BranchSchemaEnabled)
+			validate_constraint(con);
+		if (BranchSchemaEnabled && con->contype == CONSTR_DEFAULT && unsafe_default(con->raw_expr, NULL))
+			reject("default expressions outside audited built-ins");
+		if (adding && con->contype != CONSTR_NULL && !BranchSchemaEnabled)
+			reject("non-nullable or constrained ADD COLUMN");
+		if (con->contype == CONSTR_NOTNULL && con->conname && !BranchSchemaEnabled)
+			reject("custom-named NOT NULL constraints");
+		if ((!BranchSchemaEnabled && con->deferrable) || (con->contype != CONSTR_NULL && con->contype != CONSTR_NOTNULL &&
+														  con->contype != CONSTR_PRIMARY && con->contype != CONSTR_UNIQUE &&
+														  !(BranchSchemaEnabled && (con->contype == CONSTR_DEFAULT || con->contype == CONSTR_CHECK || con->contype == CONSTR_FOREIGN || con->contype == CONSTR_IDENTITY))))
+			reject("column constraints beyond immediate primary/unique/not-null");
+	}
+	if (BranchSchemaEnabled && c->typeName->names && list_length(c->typeName->names) == 1)
+	{
+		const char *name = strVal(linitial(c->typeName->names));
+
+		if (!strcmp(name, "serial") || !strcmp(name, "bigserial") || !strcmp(name, "smallserial"))
+			return;
 	}
 	typenameTypeIdAndMod(NULL, c->typeName, &typid, &typmod);
 	t = SearchSysCache1(TYPEOID, ObjectIdGetDatum(typid));
-	if (!HeapTupleIsValid(t)) elog(ERROR,"type cache lookup failed");
-	if (((Form_pg_type) GETSTRUCT(t))->typnamespace != PG_CATALOG_NAMESPACE) reject("user-defined column types");
+	if (!HeapTupleIsValid(t))
+		elog(ERROR, "type cache lookup failed");
+	if (((Form_pg_type) GETSTRUCT(t))->typnamespace != PG_CATALOG_NAMESPACE)
+		reject("user-defined column types");
 	ReleaseSysCache(t);
 }
 
 void
 BranchCatalogValidateCreate(Node *node)
 {
-	ListCell *lc;
+	ListCell   *lc;
+
 	if (IsA(node, CreateStmt))
 	{
 		CreateStmt *c = (CreateStmt *) node;
+
 		if (c->relation->relpersistence != RELPERSISTENCE_PERMANENT || c->inhRelations || c->partbound || c->partspec || c->ofTypename)
 			reject("temporary/unlogged, inherited, partitioned or typed tables");
-		if (c->relation->schemaname && strcmp(c->relation->schemaname,"public") != 0)
+		if (c->relation->schemaname && strcmp(c->relation->schemaname, "public") != 0)
 			reject("application schemas other than public");
-		if (c->tablespacename) reject("custom tablespaces");
-		foreach(lc,c->options)
+		if (c->tablespacename)
+			reject("custom tablespaces");
+		foreach(lc, c->options)
 		{
-			DefElem *option = lfirst_node(DefElem,lc);
-			if (strcmp(option->defname,"autovacuum_enabled") != 0 || defGetBoolean(option))
+			DefElem    *option = lfirst_node(DefElem, lc);
+
+			if (strcmp(option->defname, "autovacuum_enabled") != 0 || defGetBoolean(option))
 				reject("table storage options other than autovacuum_enabled=false");
 		}
 		c->relation->schemaname = pstrdup("public");
 		if (c->options == NIL)
-			c->options = list_make1(makeDefElem("autovacuum_enabled",(Node *)makeString("false"),-1));
-		if (c->accessMethod && strcmp(c->accessMethod,"branch_heap") != 0) reject("application tables outside branch_heap");
+			c->options = list_make1(makeDefElem("autovacuum_enabled", (Node *) makeString("false"), -1));
+		if (c->accessMethod && strcmp(c->accessMethod, "branch_heap") != 0)
+			reject("application tables outside branch_heap");
 		c->accessMethod = pstrdup("branch_heap");
 		foreach(lc, c->tableElts)
 		{
-			Node *elt = lfirst(lc);
-			if (IsA(elt,ColumnDef)) validate_column((ColumnDef *) elt,false);
-			else if (IsA(elt,Constraint))
+			Node	   *elt = lfirst(lc);
+
+			if (IsA(elt, ColumnDef))
+				validate_column((ColumnDef *) elt, false);
+			else if (IsA(elt, Constraint))
 			{
 				Constraint *con = (Constraint *) elt;
-				if (con->deferrable || (con->contype != CONSTR_PRIMARY && con->contype != CONSTR_UNIQUE)) reject("table constraints beyond immediate primary/unique");
+
+				if (BranchSchemaEnabled)
+					validate_constraint(con);
+				if ((!BranchSchemaEnabled && con->deferrable) || (con->contype != CONSTR_PRIMARY && con->contype != CONSTR_UNIQUE && !(BranchSchemaEnabled && (con->contype == CONSTR_CHECK || con->contype == CONSTR_FOREIGN))))
+					reject("table constraints beyond immediate primary/unique");
 			}
-			else reject("LIKE and other table definition clauses");
+			else
+				reject("LIKE and other table definition clauses");
 		}
 	}
-	else if (IsA(node,AlterTableStmt) || IsA(node,IndexStmt))
+	else if (IsA(node, AlterTableStmt) || IsA(node, IndexStmt))
 	{
-		RangeVar *rv = IsA(node,AlterTableStmt) ? ((AlterTableStmt *)node)->relation : ((IndexStmt *)node)->relation;
-		Oid relid = RangeVarGetRelid(rv,AccessShareLock,false);
-		Relation rel = table_open(relid,NoLock);
+		RangeVar   *rv = IsA(node, AlterTableStmt) ? ((AlterTableStmt *) node)->relation : ((IndexStmt *) node)->relation;
+		Oid			relid = RangeVarGetRelid(rv, AccessShareLock, false);
+		Relation	rel = table_open(relid, NoLock);
 
 		if (rel->rd_rel->relnamespace != PG_PUBLIC_NAMESPACE || rel->rd_rel->relam != BRANCH_HEAP_TABLE_AM_OID)
 			reject("DDL outside branch-owned public tables");
-		table_close(rel,NoLock);
-		if (IsA(node,IndexStmt)) return;
+		table_close(rel, NoLock);
+		if (IsA(node, IndexStmt))
+			return;
 		foreach(lc, ((AlterTableStmt *) node)->cmds)
 		{
 			AlterTableCmd *cmd = lfirst_node(AlterTableCmd, lc);
-			if (cmd->subtype == AT_AddIndex) continue;
-			if (cmd->subtype == AT_ChangeOwner && superuser()) continue;
-			if (cmd->subtype != AT_AddColumn || !IsA(cmd->def,ColumnDef)) reject("ALTER TABLE beyond nullable ADD COLUMN");
-			validate_column((ColumnDef *) cmd->def,true);
+
+			if (cmd->subtype == AT_AddIndex)
+				continue;
+			if (cmd->subtype == AT_ChangeOwner && superuser())
+				continue;
+			if (BranchSchemaEnabled && cmd->subtype == AT_AddConstraint && IsA(cmd->def, Constraint))
+				validate_constraint((Constraint *) cmd->def);
+			if (BranchSchemaEnabled && cmd->subtype == AT_ColumnDefault && unsafe_default(cmd->def, NULL))
+				reject("default expressions outside audited built-ins");
+			if (BranchSchemaEnabled && (cmd->subtype == AT_AddConstraint || cmd->subtype == AT_ColumnDefault || cmd->subtype == AT_SetNotNull || cmd->subtype == AT_DropNotNull))
+				continue;
+			if (BranchSchemaEnabled && (cmd->subtype == AT_DropColumn || cmd->subtype == AT_DropConstraint))
+			{
+				if (cmd->subtype == AT_DropColumn || OidIsValid(get_constraint_index(get_relation_constraint_oid(relid, cmd->name, cmd->missing_ok))))
+					BranchDetachRelation(relid);
+				continue;
+			}
+			if (cmd->subtype != AT_AddColumn || !IsA(cmd->def, ColumnDef))
+				reject("ALTER TABLE beyond nullable ADD COLUMN");
+			validate_column((ColumnDef *) cmd->def, true);
 		}
 	}
 }
@@ -447,6 +552,61 @@ alias_file(Oid destid, Oid sourceid)
 	}
 }
 
+/* Preserve missing-value metadata and physical attribute positions when
+ * unchanged tuples are shared. Dropped positions remain real descriptor gaps. */
+static void
+copy_column_metadata(Oid source, Oid destination)
+{
+	Relation	attributes;
+	HeapTuple	relation;
+	int			count,
+				n;
+	bool		saved = bypass;
+
+	bypass = true;
+	relation = SearchSysCache1(RELOID, ObjectIdGetDatum(source));
+	count = ((Form_pg_class) GETSTRUCT(relation))->relnatts;
+	ReleaseSysCache(relation);
+	attributes = table_open(AttributeRelationId, RowExclusiveLock);
+	for (n = 1; n <= count; n++)
+	{
+		HeapTuple	src = SearchSysCache2(ATTNUM, ObjectIdGetDatum(source), Int16GetDatum(n));
+		HeapTuple	dst = SearchSysCacheCopy2(ATTNUM, ObjectIdGetDatum(destination), Int16GetDatum(n));
+		Datum		values[Natts_pg_attribute] = {0};
+		bool		nulls[Natts_pg_attribute] = {false};
+		bool		replace[Natts_pg_attribute] = {false};
+		HeapTuple	updated;
+		bool		isnull;
+
+		if (!HeapTupleIsValid(src) || !HeapTupleIsValid(dst))
+			elog(ERROR, "missing native fork attribute");
+		values[Anum_pg_attribute_attmissingval - 1] = heap_getattr(src, Anum_pg_attribute_attmissingval, RelationGetDescr(attributes), &isnull);
+		nulls[Anum_pg_attribute_attmissingval - 1] = isnull;
+		replace[Anum_pg_attribute_attmissingval - 1] = true;
+		updated = heap_modify_tuple(dst, RelationGetDescr(attributes), values, nulls, replace);
+		memcpy(GETSTRUCT(updated), GETSTRUCT(src), ATTRIBUTE_FIXED_PART_SIZE);
+		((Form_pg_attribute) GETSTRUCT(updated))->attrelid = destination;
+		CatalogTupleUpdate(attributes, &updated->t_self, updated);
+		heap_freetuple(updated);
+		heap_freetuple(dst);
+		ReleaseSysCache(src);
+	}
+	table_close(attributes, NoLock);
+	bypass = saved;
+	CommandCounterIncrement();
+	CacheInvalidateRelcacheByRelid(destination);
+}
+
+typedef struct CloneSequence
+{
+	char *create;
+	char *configure;
+	char *name;
+	char *owned;
+	int64 last;
+	bool called;
+} CloneSequence;
+
 typedef struct CloneIndex { Oid source; char *name; char *ddl; bool standalone; } CloneIndex;
 typedef struct CloneTable
 {
@@ -463,53 +623,105 @@ void
 BranchCatalogFork(const char *name)
 {
 	CloneTable *tables;
-	int ntables;
+	int			ntables;
 	MemoryContext caller = CurrentMemoryContext;
-	char *saved_name = BranchName;
-	int64 saved_id = branch_id;
-	int64 child;
-	uint64 i;
+	char	   *saved_name = BranchName;
+	int64		saved_id = branch_id;
+	int64		child;
+	uint64		i;
+	CloneSequence *sequences = NULL;
+	uint64		nsequences = 0,
+				nforeign = 0;
+	char	  **foreign = NULL;
 
-	if (!BranchCatalogEnabled) return;
+	if (!BranchCatalogEnabled)
+		return;
 	SPI_connect();
-	catalog_query(psprintf("SELECT id FROM branch_native.branches WHERE name=%s",quote_literal_cstr(name)),false,0);
-	if (SPI_processed != 1) elog(ERROR,"new branch descriptor is not visible");
+	catalog_query(psprintf("SELECT id FROM branch_native.branches WHERE name=%s", quote_literal_cstr(name)), false, 0);
+	if (SPI_processed != 1)
+		elog(ERROR, "new branch descriptor is not visible");
 	{
-		bool n;
-		child = DatumGetInt64(SPI_getbinval(SPI_tuptable->vals[0], SPI_tuptable->tupdesc,1,&n));
+		bool		n;
+
+		child = DatumGetInt64(SPI_getbinval(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, 1, &n));
+	}
+	if (BranchSchemaEnabled)
+	{
+		catalog_query("SELECT format('public.%I',c.relname),"
+					  "format('CREATE SEQUENCE public.%I AS %s INCREMENT BY %s MINVALUE %s MAXVALUE %s START WITH %s CACHE %s %s',c.relname,format_type(s.seqtypid,NULL),s.seqincrement,s.seqmin,s.seqmax,s.seqstart,s.seqcache,CASE WHEN s.seqcycle THEN 'CYCLE' ELSE 'NO CYCLE' END),"
+					  "format('ALTER SEQUENCE public.%I AS %s INCREMENT BY %s MINVALUE %s MAXVALUE %s START WITH %s CACHE %s %s',c.relname,format_type(s.seqtypid,NULL),s.seqincrement,s.seqmin,s.seqmax,s.seqstart,s.seqcache,CASE WHEN s.seqcycle THEN 'CYCLE' ELSE 'NO CYCLE' END),"
+					  "EXISTS(SELECT FROM pg_depend d WHERE d.classid='pg_class'::regclass AND d.objid=c.oid AND d.deptype='i'),"
+					  "COALESCE((SELECT format('ALTER SEQUENCE public.%I OWNED BY public.%I.%I',c.relname,p.relname,a.attname) FROM pg_depend d JOIN pg_class p ON p.oid=d.refobjid JOIN pg_attribute a ON a.attrelid=p.oid AND a.attnum=d.refobjsubid WHERE d.classid='pg_class'::regclass AND d.refclassid='pg_class'::regclass AND d.objid=c.oid AND d.deptype='a'),'') "
+					  "FROM pg_class c JOIN pg_sequence s ON s.seqrelid=c.oid JOIN branch_native.objects o ON o.catalog='pg_class'::regclass AND o.object=c.oid WHERE o.owner=0 AND c.relkind='S' AND c.relnamespace='public'::regnamespace ORDER BY c.oid", true, 0);
+		nsequences = SPI_processed;
+		sequences = MemoryContextAllocZero(caller, sizeof(CloneSequence) * Max(nsequences, 1));
+		for (i = 0; i < nsequences; i++)
+		{
+			HeapTuple	t = SPI_tuptable->vals[i];
+			TupleDesc	d = SPI_tuptable->tupdesc;
+			bool		null;
+
+			sequences[i].name = MemoryContextStrdup(caller, SPI_getvalue(t, d, 1));
+			if (!DatumGetBool(SPI_getbinval(t, d, 4, &null)))
+				sequences[i].create = MemoryContextStrdup(caller, SPI_getvalue(t, d, 2));
+			sequences[i].configure = MemoryContextStrdup(caller, SPI_getvalue(t, d, 3));
+			sequences[i].owned = MemoryContextStrdup(caller, SPI_getvalue(t, d, 5));
+		}
+		for (i = 0; i < nsequences; i++)
+		{
+			bool		null;
+
+			catalog_query(psprintf("SELECT last_value,is_called FROM %s", sequences[i].name), true, 0);
+			sequences[i].last = DatumGetInt64(SPI_getbinval(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, 1, &null));
+			sequences[i].called = DatumGetBool(SPI_getbinval(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, 2, &null));
+		}
+		catalog_query("SELECT format('ALTER TABLE public.%I ADD CONSTRAINT %I %s',c.relname,k.conname,pg_get_constraintdef(k.oid)) FROM pg_constraint k JOIN pg_class c ON c.oid=k.conrelid WHERE k.contype='f' AND c.relnamespace='public'::regnamespace ORDER BY k.oid", true, 0);
+		nforeign = SPI_processed;
+		foreign = MemoryContextAllocZero(caller, sizeof(char *) * Max(nforeign, 1));
+		for (i = 0; i < nforeign; i++)
+			foreign[i] = MemoryContextStrdup(caller, SPI_getvalue(SPI_tuptable->vals[i], SPI_tuptable->tupdesc, 1));
 	}
 	catalog_query("SELECT c.oid,c.relnamespace,c.reltoastrelid,c.relname,"
-		"format('CREATE TABLE public.%I (%s%s) USING branch_heap WITH (autovacuum_enabled=false)',c.relname,"
-		"(SELECT string_agg(format('%I %s%s',a.attname,format_type(a.atttypid,a.atttypmod),"
-		"CASE WHEN a.attnotnull THEN ' NOT NULL' ELSE '' END),',' ORDER BY a.attnum) FROM pg_attribute a WHERE a.attrelid=c.oid AND a.attnum>0 AND NOT a.attisdropped),"
-		"COALESCE((SELECT ','||string_agg(format('CONSTRAINT %I %s',k.conname,pg_get_constraintdef(k.oid)),',' ORDER BY k.oid) FROM pg_constraint k WHERE k.conrelid=c.oid AND k.contype IN ('p','u')),'')) "
-		"FROM pg_class c JOIN branch_native.objects o ON o.catalog='pg_class'::regclass AND o.object=c.oid "
-		"WHERE o.owner=0 AND c.relam=(SELECT oid FROM pg_am WHERE amname='branch_heap') AND c.relkind='r' ORDER BY c.oid",false,0);
+				  "format('CREATE TABLE public.%I (%s%s) USING branch_heap WITH (autovacuum_enabled=false)',c.relname,"
+				  "(SELECT string_agg(format('%I %s%s%s',a.attname,CASE WHEN a.attisdropped THEN 'text' ELSE format_type(a.atttypid,a.atttypmod) END,"
+				  "CASE WHEN a.attnotnull THEN ' NOT NULL' ELSE '' END,"
+				  "CASE WHEN a.attidentity IN ('a','d') THEN CASE WHEN a.attidentity='a' THEN ' GENERATED ALWAYS AS IDENTITY' ELSE ' GENERATED BY DEFAULT AS IDENTITY' END || ' (SEQUENCE NAME ' || pg_get_serial_sequence(format('public.%I',c.relname),a.attname) || ')' "
+				  "WHEN a.atthasdef THEN ' DEFAULT '||(SELECT pg_get_expr(adbin,adrelid) FROM pg_attrdef WHERE adrelid=a.attrelid AND adnum=a.attnum) ELSE '' END),',' ORDER BY a.attnum) FROM pg_attribute a WHERE a.attrelid=c.oid AND a.attnum>0),"
+				  "COALESCE((SELECT ','||string_agg(format('CONSTRAINT %I %s',k.conname,pg_get_constraintdef(k.oid)),',' ORDER BY k.oid) FROM pg_constraint k WHERE k.conrelid=c.oid AND k.contype IN ('p','u','c')),'')) "
+				  "FROM pg_class c JOIN branch_native.objects o ON o.catalog='pg_class'::regclass AND o.object=c.oid "
+				  "WHERE o.owner=0 AND c.relam=(SELECT oid FROM pg_am WHERE amname='branch_heap') AND c.relkind='r' ORDER BY c.oid", false, 0);
 	ntables = SPI_processed;
-	tables = MemoryContextAllocZero(caller,sizeof(CloneTable)*Max(ntables,1));
-	for (i=0;i<SPI_processed;i++)
+	tables = MemoryContextAllocZero(caller, sizeof(CloneTable) * Max(ntables, 1));
+	for (i = 0; i < SPI_processed; i++)
 	{
-		HeapTuple t=SPI_tuptable->vals[i]; TupleDesc d=SPI_tuptable->tupdesc; bool n;
-		tables[i].source=DatumGetObjectId(SPI_getbinval(t,d,1,&n));
-		tables[i].ns=DatumGetObjectId(SPI_getbinval(t,d,2,&n));
-		tables[i].toast=DatumGetObjectId(SPI_getbinval(t,d,3,&n));
-		tables[i].name=MemoryContextStrdup(caller,SPI_getvalue(t,d,4));
-		tables[i].ddl=MemoryContextStrdup(caller,SPI_getvalue(t,d,5));
+		HeapTuple	t = SPI_tuptable->vals[i];
+		TupleDesc	d = SPI_tuptable->tupdesc;
+		bool		n;
+
+		tables[i].source = DatumGetObjectId(SPI_getbinval(t, d, 1, &n));
+		tables[i].ns = DatumGetObjectId(SPI_getbinval(t, d, 2, &n));
+		tables[i].toast = DatumGetObjectId(SPI_getbinval(t, d, 3, &n));
+		tables[i].name = MemoryContextStrdup(caller, SPI_getvalue(t, d, 4));
+		tables[i].ddl = MemoryContextStrdup(caller, SPI_getvalue(t, d, 5));
 	}
-	for(i=0;i<ntables;i++)
+	for (i = 0; i < ntables; i++)
 	{
-		uint64 j;
+		uint64		j;
+
 		catalog_query(psprintf("SELECT i.indexrelid,c.relname,pg_get_indexdef(i.indexrelid),"
-			"NOT EXISTS(SELECT FROM pg_constraint k WHERE k.conindid=i.indexrelid) FROM pg_index i JOIN pg_class c ON c.oid=i.indexrelid WHERE i.indrelid=%u ORDER BY i.indexrelid",tables[i].source),false,0);
-		tables[i].nindexes=SPI_processed;
-		tables[i].indexes=MemoryContextAllocZero(caller,sizeof(CloneIndex)*Max(SPI_processed,1));
-		for(j=0;j<SPI_processed;j++)
+							   "NOT EXISTS(SELECT FROM pg_constraint k WHERE k.conindid=i.indexrelid) FROM pg_index i JOIN pg_class c ON c.oid=i.indexrelid WHERE i.indrelid=%u ORDER BY i.indexrelid", tables[i].source), false, 0);
+		tables[i].nindexes = SPI_processed;
+		tables[i].indexes = MemoryContextAllocZero(caller, sizeof(CloneIndex) * Max(SPI_processed, 1));
+		for (j = 0; j < SPI_processed; j++)
 		{
-			HeapTuple t=SPI_tuptable->vals[j]; TupleDesc d=SPI_tuptable->tupdesc; bool n;
-			tables[i].indexes[j].source=DatumGetObjectId(SPI_getbinval(t,d,1,&n));
-			tables[i].indexes[j].name=MemoryContextStrdup(caller,SPI_getvalue(t,d,2));
-			tables[i].indexes[j].ddl=MemoryContextStrdup(caller,SPI_getvalue(t,d,3));
-			tables[i].indexes[j].standalone=DatumGetBool(SPI_getbinval(t,d,4,&n));
+			HeapTuple	t = SPI_tuptable->vals[j];
+			TupleDesc	d = SPI_tuptable->tupdesc;
+			bool		n;
+
+			tables[i].indexes[j].source = DatumGetObjectId(SPI_getbinval(t, d, 1, &n));
+			tables[i].indexes[j].name = MemoryContextStrdup(caller, SPI_getvalue(t, d, 2));
+			tables[i].indexes[j].ddl = MemoryContextStrdup(caller, SPI_getvalue(t, d, 3));
+			tables[i].indexes[j].standalone = DatumGetBool(SPI_getbinval(t, d, 4, &n));
 		}
 	}
 	SPI_finish();
@@ -519,64 +731,95 @@ BranchCatalogFork(const char *name)
 		BranchName = (char *) name;
 		branch_id = child;
 		InvalidateSystemCaches();
-		for(i=0;i<ntables;i++)
+		for (i = 0; i < nsequences; i++)
+			if (sequences[i].create)
+			{
+				SPI_connect();
+				catalog_query(sequences[i].create, false, 0);
+				SPI_finish();
+			}
+		for (i = 0; i < ntables; i++)
 		{
-			Oid dest, desttoast;
-			uint64 j;
-			HeapTuple t;
+			Oid			dest,
+						desttoast;
+			uint64		j;
+			HeapTuple	t;
 
 			SPI_connect();
-			if(catalog_query(tables[i].ddl,false,0)<0) elog(ERROR,"cannot create branch schema descriptor");
+			if (catalog_query(tables[i].ddl, false, 0) < 0)
+				elog(ERROR, "cannot create branch schema descriptor");
 			SPI_finish();
-			for(j=0;j<tables[i].nindexes;j++)
-				if(tables[i].indexes[j].standalone)
+			for (j = 0; j < tables[i].nindexes; j++)
+				if (tables[i].indexes[j].standalone)
 				{
 					SPI_connect();
-					if(catalog_query(tables[i].indexes[j].ddl,false,0)<0) elog(ERROR,"cannot clone branch index descriptor");
+					if (catalog_query(tables[i].indexes[j].ddl, false, 0) < 0)
+						elog(ERROR, "cannot clone branch index descriptor");
 					SPI_finish();
 				}
-			dest=get_relname_relid(tables[i].name,tables[i].ns);
-			t=SearchSysCache1(RELOID,ObjectIdGetDatum(dest));
-			if (!HeapTupleIsValid(t)) elog(ERROR,"missing cloned table %s (%u)",tables[i].name,dest);
-			desttoast=((Form_pg_class)GETSTRUCT(t))->reltoastrelid;
+			dest = get_relname_relid(tables[i].name, tables[i].ns);
+			t = SearchSysCache1(RELOID, ObjectIdGetDatum(dest));
+			if (!HeapTupleIsValid(t))
+				elog(ERROR, "missing cloned table %s (%u)", tables[i].name, dest);
+			desttoast = ((Form_pg_class) GETSTRUCT(t))->reltoastrelid;
 			ReleaseSysCache(t);
-			if(OidIsValid(desttoast) && OidIsValid(tables[i].toast))
+			if (OidIsValid(desttoast) && OidIsValid(tables[i].toast))
 			{
-				Oid srcindex,dstindex;
-				Relation r;
-				bypass=true;
-				r=table_open(tables[i].toast,AccessShareLock);
-				srcindex=linitial_oid(RelationGetIndexList(r));
-				table_close(r,NoLock);
-				bypass=false;
-				r=table_open(desttoast,AccessExclusiveLock);
-				dstindex=linitial_oid(RelationGetIndexList(r));
-				table_close(r,NoLock);
-				alias_file(desttoast,tables[i].toast);
-				alias_file(dstindex,srcindex);
+				Oid			srcindex,
+							dstindex;
+				Relation	r;
+
+				bypass = true;
+				r = table_open(tables[i].toast, AccessShareLock);
+				srcindex = linitial_oid(RelationGetIndexList(r));
+				table_close(r, NoLock);
+				bypass = false;
+				r = table_open(desttoast, AccessExclusiveLock);
+				dstindex = linitial_oid(RelationGetIndexList(r));
+				table_close(r, NoLock);
+				alias_file(desttoast, tables[i].toast);
+				alias_file(dstindex, srcindex);
 			}
-			alias_file(dest,tables[i].source);
-			for(j=0;j<tables[i].nindexes;j++)
+			alias_file(dest, tables[i].source);
+			if (BranchSchemaEnabled)
+				copy_column_metadata(tables[i].source, dest);
+			for (j = 0; j < tables[i].nindexes; j++)
 			{
-				Oid dstindex=get_relname_relid(tables[i].indexes[j].name,tables[i].ns);
-				alias_file(dstindex,tables[i].indexes[j].source);
+				Oid			dstindex = get_relname_relid(tables[i].indexes[j].name, tables[i].ns);
+
+				alias_file(dstindex, tables[i].indexes[j].source);
 			}
 			SPI_connect();
-			catalog_query(psprintf("UPDATE branch_native.objects SET source=%u WHERE catalog='pg_class'::regclass AND object=%u",BranchStorageRelation(tables[i].source),dest),false,0);
+			catalog_query(psprintf("UPDATE branch_native.objects SET source=%u WHERE catalog='pg_class'::regclass AND object=%u", BranchStorageRelation(tables[i].source), dest), false, 0);
 			SPI_finish();
-			remember(RelationRelationId,dest,child,BranchStorageRelation(tables[i].source));
+			remember(RelationRelationId, dest, child, BranchStorageRelation(tables[i].source));
 		}
-		BranchName=saved_name;
-		branch_id=saved_id;
-		BranchCatalogInternal=false;
+		for (i = 0; i < nsequences; i++)
+		{
+			SPI_connect();
+			catalog_query(sequences[i].configure, false, 0);
+			if (sequences[i].owned[0])
+				catalog_query(sequences[i].owned, false, 0);
+			catalog_query(psprintf("SELECT pg_catalog.setval(%s::regclass," INT64_FORMAT ",%s)", quote_literal_cstr(sequences[i].name), sequences[i].last, sequences[i].called ? "true" : "false"), false, 0);
+			SPI_finish();
+		}
+		for (i = 0; i < nforeign; i++)
+		{
+			SPI_connect();
+			catalog_query(foreign[i], false, 0);
+			SPI_finish();
+		}
+		BranchName = saved_name;
+		branch_id = saved_id;
+		BranchCatalogInternal = false;
 		InvalidateSystemCaches();
 	}
 	PG_CATCH();
 	{
-		bypass=false;
-		BranchName=saved_name;
-		branch_id=saved_id;
-		BranchCatalogInternal=false;
+		bypass = false;
+		BranchName = saved_name;
+		branch_id = saved_id;
+		BranchCatalogInternal = false;
 		InvalidateSystemCaches();
 		PG_RE_THROW();
 	}

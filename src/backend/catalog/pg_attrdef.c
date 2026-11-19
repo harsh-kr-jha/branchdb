@@ -14,6 +14,7 @@
  */
 #include "postgres.h"
 
+#include "access/branchheap.h"
 #include "access/genam.h"
 #include "access/htup_details.h"
 #include "access/relation.h"
@@ -56,6 +57,7 @@ StoreAttrDefault(Relation rel, AttrNumber attnum,
 	ObjectAddress colobject,
 				defobject;
 
+	BranchValidateDefault(rel, expr);
 	adrel = table_open(AttrDefaultRelationId, RowExclusiveLock);
 
 	/*

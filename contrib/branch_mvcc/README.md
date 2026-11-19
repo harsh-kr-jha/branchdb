@@ -1,7 +1,8 @@
 # Persistent branch experiment
 
-Latest engine checkpoint: [milestone 7](native_m7/README.md), with authenticated
-branch connections, safe branch deletion, retained storage and DROP/TRUNCATE.
+Latest engine checkpoint: [milestone 8](native_m8/README.md), with real pinned
+Prisma/Django workflows, branch-local migrations, sequences, foreign keys and
+upserts, plus authenticated connections and retained-storage lifecycle.
 The runnable app fixture below remains useful for the earlier SQL subset.
 
 Native milestone 5 provides a runnable web-app MVP on the modified

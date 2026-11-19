@@ -14,6 +14,7 @@
  */
 #include "postgres.h"
 
+#include "access/branchheap.h"
 #include "access/htup_details.h"
 #include "access/multixact.h"
 #include "access/relation.h"
@@ -656,8 +657,10 @@ nextval_internal(Oid relid, bool check_permissions)
 	bool		cycle;
 	bool		logit = false;
 
-	/* open and lock sequence */
+	/* Resolve the physical relation before the branch writer lock, matching
+	 * ALTER SEQUENCE's relation-before-writer ordering. */
 	init_sequence(relid, &elm, &seqrel);
+	BranchSequenceAccess(relid);
 
 	if (check_permissions &&
 		pg_class_aclcheck(elm->relid, GetUserId(),
@@ -967,8 +970,10 @@ SetSequence(Oid relid, int64 next, bool iscalled)
 	int64		maxv,
 				minv;
 
-	/* open and lock sequence */
+	/* Resolve the physical relation before the branch writer lock, matching
+	 * ALTER SEQUENCE's relation-before-writer ordering. */
 	init_sequence(relid, &elm, &seqrel);
+	BranchSequenceAccess(relid);
 
 	if (pg_class_aclcheck(elm->relid, GetUserId(), ACL_UPDATE) != ACLCHECK_OK)
 		ereport(ERROR,

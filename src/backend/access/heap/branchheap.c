@@ -17,6 +17,7 @@
 #include "catalog/namespace.h"
 #include "catalog/pg_am_d.h"
 #include "catalog/pg_class.h"
+#include "catalog/pg_namespace_d.h"
 #include "executor/spi.h"
 #include "executor/executor.h"
 #include "fmgr.h"
@@ -157,8 +158,14 @@ static void
 check_relation(Relation rel)
 {
 	if (rel->rd_rel->relpersistence != RELPERSISTENCE_PERMANENT ||
-		rel->trigdesc != NULL)
+		(rel->trigdesc != NULL && !BranchSchemaEnabled))
 		unsupported("temporary/unlogged tables or triggers");
+	if (rel->trigdesc)
+	{
+		int i;
+		for(i=0;i<rel->trigdesc->numtriggers;i++)
+			if (!rel->trigdesc->triggers[i].tgisinternal) unsupported("user-defined triggers");
+	}
 }
 
 static char *
@@ -437,15 +444,60 @@ static void
 branch_multi(Relation rel, TupleTableSlot **slots, int count, CommandId cid,
 			 uint32 options, BulkInsertState bistate)
 {
-	/* COPY FROM uses this path. Restrict until statement CID semantics tested. */
-	unsupported("COPY FROM / multi_insert");
+	int			i;
+
+	if (!BranchSchemaEnabled)
+		unsupported("COPY FROM / multi_insert");
+	for (i = 0; i < count; i++)
+		branch_insert(rel, slots[i], cid, options, bistate);
 }
 
 static void
 branch_speculative(Relation rel, TupleTableSlot *slot, CommandId cid,
 				   uint32 options, BulkInsertState bistate, uint32 token)
 {
-	unsupported("ON CONFLICT / speculative insert");
+	BranchContext b;
+	int64		id;
+
+	if (!BranchSchemaEnabled)
+		unsupported("ON CONFLICT / speculative insert");
+	admission(ShareLock);
+	check_relation(rel);
+	SPI_connect();
+	b = context();
+	writer_lock(b);
+	id = reserve_id();
+	heap->tuple_insert_speculative(rel, slot, cid, options, bistate, token);
+	record_version(rel, b, id, id, 0, &slot->tts_tid);
+	SPI_finish();
+	prepare_dirty(rel);
+}
+
+static void
+branch_complete_speculative(Relation rel, TupleTableSlot *slot, uint32 token, bool succeeded)
+{
+	heap->tuple_complete_speculative(rel, slot, token, succeeded);
+	if (!succeeded)
+	{
+		SPI_connect();
+		query(psprintf("DELETE FROM branch_native.versions WHERE %s AND block=%u AND offset_no=%u", relation_filter(rel), ItemPointerGetBlockNumber(&slot->tts_tid), ItemPointerGetOffsetNumber(&slot->tts_tid)), GetLatestSnapshot(), false);
+		SPI_finish();
+	}
+	prepare_dirty(rel);
+}
+
+void
+BranchPrepareWrite(Relation rel)
+{
+	BranchContext b;
+
+	admission(ShareLock);
+	check_relation(rel);
+	SPI_connect();
+	b = context();
+	writer_lock(b);
+	SPI_finish();
+	prepare_dirty(rel);
 }
 
 static bool
@@ -470,7 +522,8 @@ branch_index(IndexScanDesc scan, uint32 flags)
 {
 	if (scan->xs_want_itup || scan->indexRelation->rd_rel->relam != BTREE_AM_OID)
 		unsupported("index-only or non-B-tree scans");
-	scan->xs_table_opaque = branch_begin(scan->heapRelation, scan->xs_snapshot,
+	scan->xs_table_opaque = branch_begin(scan->heapRelation,
+										 BranchSchemaEnabled && scan->xs_snapshot->snapshot_type == SNAPSHOT_DIRTY ? GetLatestSnapshot() : scan->xs_snapshot,
 										 0, NULL, NULL, SO_TYPE_SEQSCAN);
 	scan->xs_getnext_slot = branch_index_next;
 }
@@ -492,18 +545,57 @@ branch_lock(Relation rel, ItemPointer tid, Snapshot snapshot, TupleTableSlot *sl
 			CommandId cid, LockTupleMode mode, LockWaitPolicy policy, uint8 flags,
 			TM_FailureData *failure)
 {
-	unsupported("row locking / EvalPlanQual");
-	return TM_Invisible;
+	BranchContext b;
+
+	if (!BranchSchemaEnabled)
+		unsupported("row locking / EvalPlanQual");
+	admission(ShareLock);
+	check_relation(rel);
+	SPI_connect();
+	b = context();
+	if (policy != LockWaitBlock)
+		unsupported("NOWAIT/SKIP LOCKED row locking");
+	writer_lock(b);
+	(void) validate_old(rel, b, tid);
+	SPI_finish();
+	MemSet(failure, 0, sizeof(*failure));
+	if (!heap->tuple_fetch_row_version(rel, tid, SnapshotAny, slot))
+		ereport(ERROR, (errcode(ERRCODE_T_R_SERIALIZATION_FAILURE), errmsg("native row was retired; retry transaction")));
+	return TM_Ok;
+}
+
+static bool
+branch_satisfies_snapshot(Relation rel, TupleTableSlot *slot, Snapshot snapshot)
+{
+	if (BranchSchemaEnabled && snapshot == SnapshotSelf)
+	{
+		CommandCounterIncrement();
+		prepare_dirty(rel);
+		if (!selected(dirty_versions, dirty_count, &slot->tts_tid))
+			return false;
+	}
+	return heap->tuple_satisfies_snapshot(rel, slot, snapshot);
 }
 
 static bool
 branch_fetch(Relation rel, ItemPointer tid, Snapshot snapshot, TupleTableSlot *slot)
 {
-	Snapshot visible = IsMVCCSnapshot(snapshot) ? snapshot : GetActiveSnapshot();
-	TableScanDesc desc = branch_begin(rel, visible, 0, NULL, NULL, SO_TYPE_SEQSCAN);
-	BranchScan *scan = (BranchScan *) desc;
-	bool found = false;
-	int i;
+	Snapshot	visible;
+	TableScanDesc desc;
+	BranchScan *scan;
+	bool		found = false;
+	int			i;
+
+	/*
+	 * AFTER triggers need physical transition images, including obsolete
+	 * ones. The subsequent SnapshotSelf check decides whether an FK event is
+	 * live.
+	 */
+	if (BranchSchemaEnabled && snapshot == SnapshotAny)
+		return heap->tuple_fetch_row_version(rel, tid, snapshot, slot);
+	visible = IsMVCCSnapshot(snapshot) ? snapshot : GetActiveSnapshot();
+	desc = branch_begin(rel, visible, 0, NULL, NULL, SO_TYPE_SEQSCAN);
+	scan = (BranchScan *) desc;
 
 	for (i = 0; i < scan->count; i++)
 		if (!scan->versions[i].deleted && ItemPointerEquals(&scan->versions[i].tid, tid))
@@ -528,13 +620,19 @@ branch_index_build(Relation rel, Relation index, IndexInfo *info, bool sync,
 {
 	TableScanDesc ownscan;
 	TupleTableSlot *slot;
-	EState *estate;
-	Snapshot snapshot;
-	double count = 0;
+	EState	   *estate;
+	Snapshot	snapshot;
+	double		count = 0;
+	BranchVersion *history = NULL;
+	int			history_count = 0;
+	MemoryContext caller = CurrentMemoryContext;
 
-	/* Index every retained committed version so old statement snapshots remain
-	 * usable. Only the current main view participates in build-time uniqueness;
-	 * B-tree's secondary spool retains shadowed entries without unique checks. */
+	/*
+	 * Index every retained committed version so old statement snapshots
+	 * remain usable. Only the current main view participates in build-time
+	 * uniqueness; B-tree's secondary spool retains shadowed entries without
+	 * unique checks.
+	 */
 	if (scan || anyvisible || start != 0 || info->ii_Concurrent ||
 		index->rd_rel->relam != BTREE_AM_OID || !index->rd_index->indimmediate ||
 		info->ii_Expressions != NIL || info->ii_Predicate != NIL ||
@@ -543,23 +641,50 @@ branch_index_build(Relation rel, Relation index, IndexInfo *info, bool sync,
 	admission(ShareLock);
 	SPI_connect();
 	query("SELECT 1 FROM branch_native.branches WHERE id <> 0 LIMIT 1", GetLatestSnapshot(), true);
-	if (SPI_processed && !BranchCatalogInternal)
+	if (SPI_processed && !BranchCatalogInternal && !BranchSchemaEnabled)
 	{
 		if (!BranchCatalogEnabled || BranchStorageRelation(RelationGetRelid(rel)) != RelationGetRelid(rel))
 			unsupported("index creation on shared inherited storage after fork");
-		query(psprintf("SELECT 1 FROM branch_native.objects WHERE source=%u AND object<>%u LIMIT 1",RelationGetRelid(rel),RelationGetRelid(rel)),GetLatestSnapshot(),true);
-		if (SPI_processed) unsupported("index creation on shared inherited storage after fork");
+		query(psprintf("SELECT 1 FROM branch_native.objects WHERE source=%u AND object<>%u LIMIT 1", RelationGetRelid(rel), RelationGetRelid(rel)), GetLatestSnapshot(), true);
+		if (SPI_processed)
+			unsupported("index creation on shared inherited storage after fork");
 	}
 	SPI_finish();
 	slot = table_slot_create(rel, NULL);
 	estate = CreateExecutorState();
 	snapshot = RegisterSnapshot(GetLatestSnapshot());
 	ownscan = branch_begin(rel, snapshot, 0, NULL, NULL, SO_TYPE_SEQSCAN);
+	if (BranchSchemaEnabled)
+	{
+		BranchContext b;
+		uint64		i;
+
+		SPI_connect();
+		b = context();
+		query(psprintf("SELECT block,offset_no FROM branch_native.versions WHERE %s AND %s AND NOT deleted", relation_filter(rel), visible_filter(b)), snapshot, true);
+		history_count = SPI_processed;
+		history = MemoryContextAllocZero(caller, sizeof(BranchVersion) * Max(history_count, 1));
+		for (i = 0; i < SPI_processed; i++)
+			ItemPointerSet(&history[i].tid, (BlockNumber) number(SPI_tuptable->vals[i], SPI_tuptable->tupdesc, 1), (OffsetNumber) number(SPI_tuptable->vals[i], SPI_tuptable->tupdesc, 2));
+		SPI_finish();
+	}
+
 	while (heap->scan_getnextslot(((BranchScan *) ownscan)->inner, ForwardScanDirection, slot))
 	{
-		Datum values[INDEX_MAX_KEYS];
-		bool isnull[INDEX_MAX_KEYS];
+		Datum		values[INDEX_MAX_KEYS];
+		bool		isnull[INDEX_MAX_KEYS];
 
+		/*
+		 * Never deform a sibling's potentially divergent tuple layout. Retain
+		 * all this branch's historical versions for older statement
+		 * snapshots; only the selected current view participates in unique
+		 * checks.
+		 */
+		if (BranchSchemaEnabled && !selected(history, history_count, &slot->tts_tid))
+		{
+			ExecClearTuple(slot);
+			continue;
+		}
 		FormIndexDatum(info, slot, estate, values, isnull);
 		callback(index, &slot->tts_tid, values, isnull,
 				 selected(((BranchScan *) ownscan)->versions,
@@ -567,6 +692,8 @@ branch_index_build(Relation rel, Relation index, IndexInfo *info, bool sync,
 		count++;
 		ExecClearTuple(slot);
 	}
+	if (history)
+		pfree(history);
 	branch_end(ownscan);
 	UnregisterSnapshot(snapshot);
 	ExecDropSingleTupleTableSlot(slot);
@@ -603,6 +730,8 @@ branch_heap_handler(PG_FUNCTION_ARGS)
 		methods.tuple_fetch_row_version = branch_fetch;
 		methods.tuple_insert = branch_insert;
 		methods.tuple_insert_speculative = branch_speculative;
+		methods.tuple_complete_speculative = branch_complete_speculative;
+		methods.tuple_satisfies_snapshot = branch_satisfies_snapshot;
 		methods.multi_insert = branch_multi;
 		methods.tuple_update = branch_update;
 		methods.tuple_delete = branch_delete;
@@ -657,6 +786,7 @@ BranchGuardUtility(Node *node)
 	Oid ns;
 
 	if (BranchCatalogInternal) return;
+	if (BranchSchemaEnabled && BranchSchemaGuard(node)) return;
 	if (!IsTransactionState() || IsAbortedTransactionBlockState()) return;
 	/* Administrative bootstrap metadata always uses ordinary heap storage. */
 	if (superuser() && IsA(node, CreateSeqStmt))
@@ -911,4 +1041,26 @@ BranchLifecycleAdmission(void)
 	}
 	else
 		admission(ExclusiveLock);
+}
+
+/* A sequence-only transaction participates in fork admission too. Each branch
+ * owns distinct sequence storage; no sibling writes a shared sequence page. */
+void
+BranchSchemaAdmission(void)
+{
+	BranchContext b;
+
+	admission(ShareLock);
+	SPI_connect();
+	b = context();
+	writer_lock(b);
+	SPI_finish();
+}
+
+void
+BranchSequenceAccess(Oid relation)
+{
+	if (!BranchSchemaEnabled || get_rel_namespace(relation) != PG_PUBLIC_NAMESPACE)
+		return;
+	BranchSchemaAdmission();
 }
