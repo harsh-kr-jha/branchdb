@@ -51,11 +51,55 @@ static bool loading;
 static bool bypass;
 static int64 branch_id;
 static Oid owners_oid;
+static Oid branches_oid;
+static Oid retired_oid;
+static uint64 ownership_epoch=1;
+static uint64 loaded_epoch;
+static bool callbacks_registered;
 static MemoryContext owner_context;
 
 typedef struct OwnerKey { Oid catalog; Oid object; } OwnerKey;
 typedef struct OwnerEntry { OwnerKey key; int64 owner; Oid source; } OwnerEntry;
 static HTAB *owners;
+
+/* Callback bodies only mark state stale. They never query catalogs or rebuild
+ * maps under another subsystem's locks. Transaction abort must discard maps
+ * containing speculative DDL, even when no shared invalidation was published. */
+static void
+ownership_invalidation(Datum arg, Oid relation)
+{
+	ownership_epoch++;
+}
+
+static void
+ownership_xact(XactEvent event, void *arg)
+{
+	if (event == XACT_EVENT_ABORT || event == XACT_EVENT_PARALLEL_ABORT)
+		ownership_epoch++;
+}
+
+static void
+ownership_subxact(SubXactEvent event, SubTransactionId child,
+				  SubTransactionId parent, void *arg)
+{
+	ownership_epoch++;
+}
+
+/* Called by normal heap invalidation after buffer locks have been released.
+ * Ownership/retirement tables are user heaps, so core would otherwise omit
+ * their changes from shared catalog invalidation. Version DML is deliberately
+ * excluded: it changes row visibility, not catalog ownership. */
+void
+BranchCatalogInvalidate(Relation relation)
+{
+	Oid			id = RelationGetRelid(relation);
+
+	if (OidIsValid(owners_oid) && (id == owners_oid || id == branches_oid || id == retired_oid))
+	{
+		ownership_epoch++;
+		CacheInvalidateRelcacheByRelid(id);
+	}
+}
 
 static void
 reject(const char *what)
@@ -185,46 +229,68 @@ BranchCatalogVisible(HeapTuple tuple)
 void
 BranchCatalogPrepare(void)
 {
-	Oid ns;
-	HASHCTL ctl = {0};
+	Oid			ns;
+	HASHCTL		ctl = {0};
 	MemoryContext old;
 	MemoryContext previous_context = owner_context;
-	HTAB *previous_owners = owners;
-	bool pushed = false;
-	int64 next_branch;
-	uint64 i;
+	HTAB	   *previous_owners = owners;
+	bool		pushed = false;
+	int64		next_branch;
+	uint64		i;
+	uint64		refresh_epoch;
 
 	if (loading || BranchCatalogInternal || !IsTransactionState() || IsAbortedTransactionBlockState())
 		return;
+	if (!callbacks_registered)
+	{
+		CacheRegisterRelcacheCallback(ownership_invalidation, (Datum) 0);
+		RegisterXactCallback(ownership_xact, NULL);
+		RegisterSubXactCallback(ownership_subxact, NULL);
+		callbacks_registered = true;
+	}
+	if (BranchCatalogEnabled && owners && loaded_epoch == ownership_epoch)
+		return;
 	ns = get_namespace_oid("branch_native", true);
 	if (!OidIsValid(ns) || !OidIsValid(get_relname_relid("objects", ns)))
+	{
+		BranchCatalogEnabled = false;
+		BranchSchemaEnabled = false;
+		BranchLifecycleEnabled = false;
 		return;
+	}
 	owners_oid = get_relname_relid("objects", ns);
+	branches_oid = get_relname_relid("branches", ns);
+	retired_oid = get_relname_relid("retired", ns);
 	BranchSchemaEnabled = OidIsValid(get_relname_relid("schema_features", ns));
+	refresh_epoch = ownership_epoch;
 	loading = true;
 	PG_TRY();
 	{
-		/* Refresh after a branch DDL lock wait, even if the outer command
-		 * established its statement snapshot before the wait. */
+		/*
+		 * Refresh after a branch DDL lock wait, even if the outer command
+		 * established its statement snapshot before the wait.
+		 */
 		PushActiveSnapshot(GetLatestSnapshot());
 		pushed = true;
 		SPI_connect();
 		catalog_query(psprintf("SELECT id FROM branch_native.branches WHERE name=%s",
-							 quote_literal_cstr(BranchName)), true, 0);
+							   quote_literal_cstr(BranchName)), true, 0);
 		if (SPI_processed != 1)
 		{
 			/* During setup, no main descriptor exists yet. */
 			if (!BranchCatalogEnabled && strcmp(BranchName, "main") == 0)
 			{
 				SPI_finish();
-				if (pushed) PopActiveSnapshot();
+				if (pushed)
+					PopActiveSnapshot();
 				loading = false;
 				goto prepared_done;
 			}
 			ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("unknown native branch \"%s\"", BranchName)));
 		}
 		{
-			bool isnull;
+			bool		isnull;
+
 			next_branch = DatumGetInt64(SPI_getbinval(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, 1, &isnull));
 		}
 		owner_context = AllocSetContextCreate(TopMemoryContext, "branch catalog ownership", ALLOCSET_DEFAULT_SIZES);
@@ -234,40 +300,49 @@ BranchCatalogPrepare(void)
 		ctl.hcxt = owner_context;
 		owners = hash_create("branch object ownership", 256, &ctl, HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
 		MemoryContextSwitchTo(old);
-		/* Shared system/metadata/TOAST descriptors are global even when their
-		 * dynamically allocated OIDs exceed the bootstrap OID range. */
+
+		/*
+		 * Shared system/metadata/TOAST descriptors are global even when their
+		 * dynamically allocated OIDs exceed the bootstrap OID range.
+		 */
 		catalog_query("SELECT 'pg_class'::regclass::oid,oid FROM pg_class WHERE relnamespace <> 'public'::regnamespace "
-					"UNION ALL SELECT 'pg_type'::regclass::oid,oid FROM pg_type WHERE typnamespace <> 'public'::regnamespace "
-					"UNION ALL SELECT 'pg_constraint'::regclass::oid,oid FROM pg_constraint WHERE connamespace <> 'public'::regnamespace", true, 0);
+					  "UNION ALL SELECT 'pg_type'::regclass::oid,oid FROM pg_type WHERE typnamespace <> 'public'::regnamespace "
+					  "UNION ALL SELECT 'pg_constraint'::regclass::oid,oid FROM pg_constraint WHERE connamespace <> 'public'::regnamespace", true, 0);
 		for (i = 0; i < SPI_processed; i++)
 		{
-			bool n;
-			Oid cat = DatumGetObjectId(SPI_getbinval(SPI_tuptable->vals[i], SPI_tuptable->tupdesc, 1, &n));
-			Oid obj = DatumGetObjectId(SPI_getbinval(SPI_tuptable->vals[i], SPI_tuptable->tupdesc, 2, &n));
+			bool		n;
+			Oid			cat = DatumGetObjectId(SPI_getbinval(SPI_tuptable->vals[i], SPI_tuptable->tupdesc, 1, &n));
+			Oid			obj = DatumGetObjectId(SPI_getbinval(SPI_tuptable->vals[i], SPI_tuptable->tupdesc, 2, &n));
+
 			remember(cat, obj, -1, InvalidOid);
 		}
 		catalog_query("SELECT catalog,object,owner,source FROM branch_native.objects", true, 0);
 		for (i = 0; i < SPI_processed; i++)
 		{
-			bool n;
-			HeapTuple t = SPI_tuptable->vals[i];
-			TupleDesc d = SPI_tuptable->tupdesc;
-			remember(DatumGetObjectId(SPI_getbinval(t,d,1,&n)), DatumGetObjectId(SPI_getbinval(t,d,2,&n)),
-					 DatumGetInt64(SPI_getbinval(t,d,3,&n)), DatumGetObjectId(SPI_getbinval(t,d,4,&n)));
+			bool		n;
+			HeapTuple	t = SPI_tuptable->vals[i];
+			TupleDesc	d = SPI_tuptable->tupdesc;
+
+			remember(DatumGetObjectId(SPI_getbinval(t, d, 1, &n)), DatumGetObjectId(SPI_getbinval(t, d, 2, &n)),
+					 DatumGetInt64(SPI_getbinval(t, d, 3, &n)), DatumGetObjectId(SPI_getbinval(t, d, 4, &n)));
 		}
 		SPI_finish();
 		BranchLifecycleRefresh();
-		if (pushed) PopActiveSnapshot();
-		if (previous_context) MemoryContextDelete(previous_context);
+		if (pushed)
+			PopActiveSnapshot();
+		if (previous_context)
+			MemoryContextDelete(previous_context);
 		branch_id = next_branch;
 		BranchCatalogEnabled = true;
+		loaded_epoch = refresh_epoch;
 		loading = false;
 prepared_done:
 		;
 	}
 	PG_CATCH();
 	{
-		if (owner_context != previous_context) MemoryContextDelete(owner_context);
+		if (owner_context != previous_context)
+			MemoryContextDelete(owner_context);
 		owner_context = previous_context;
 		owners = previous_owners;
 		loading = false;

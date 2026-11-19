@@ -1,8 +1,9 @@
 # Persistent branch experiment
 
-Latest engine checkpoint: [milestone 8](native_m8/README.md), with real pinned
-Prisma/Django workflows, branch-local migrations, sequences, foreign keys and
-upserts, plus authenticated connections and retained-storage lifecycle.
+Latest engine checkpoint: [milestone 9](native_m9/README.md), with cached catalog
+ownership, typed indexed metadata access, hashed visibility and measured release
+performance. Pinned Prisma/Django workflows and retained-storage lifecycle remain
+validated by the acceptance suites.
 The runnable app fixture below remains useful for the earlier SQL subset.
 
 Native milestone 5 provides a runnable web-app MVP on the modified

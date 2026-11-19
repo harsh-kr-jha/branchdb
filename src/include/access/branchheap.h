@@ -18,6 +18,7 @@ extern void BranchDetachRelation(Oid relid);
 extern void BranchValidateDefault(Relation rel, Node *expr);
 extern bool BranchCatalogInternal;
 extern void BranchCatalogPrepare(void);
+extern void BranchCatalogInvalidate(Relation relation);
 extern bool BranchCatalogScoped(Oid relid);
 extern bool BranchCatalogVisible(HeapTuple tuple);
 extern void BranchCatalogInserted(Relation rel, HeapTuple tuple);

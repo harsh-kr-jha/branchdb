@@ -1,0 +1,8 @@
+{
+  "rows": 1000000,
+  "platform": "macOS-26.7.1-arm64-arm-64bit-Mach-O",
+  "sample_returncode": 0,
+  "sample_output": "Sampling process 24586 for 1 second with 1 millisecond of run time between samples\nSampling completed, processing symbols...\nSample analysis of process 24586 written to file /tmp/branch-mvcc-m9/baseline-profile.stacks.txt\n",
+  "memory_contexts": [],
+  "backend_allocated_bytes": "26246736"
+}

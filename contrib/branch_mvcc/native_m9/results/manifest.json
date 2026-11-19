@@ -1,0 +1,27 @@
+{
+  "baseline_commit": "bad1d8b40ab80c3176714a2c8dd013c408fe3f3c",
+  "compiler": "Apple clang version 16.0.0 (clang-1600.0.26.6)",
+  "release_flags": "CFLAGS=-O2; --without-icu --without-readline; no assertions/debug",
+  "shared_buffers": "32MB",
+  "notes": "Synthetic bulk bootstrap is test-only. Branch counts include main. No simultaneous benchmark workloads. Other host activity is uncontrolled.",
+  "binaries": {
+    "baseline": {
+      "sha256": "9564a4593d23b3e06620067fbf1a093648285a56a04305394c9c03e6cd8901dd",
+      "configure": "'--prefix=/tmp/branch-mvcc-m9/baseline-install' '--without-icu' '--without-readline' 'CFLAGS=-O2'"
+    },
+    "optimized": {
+      "sha256": "0a0c79b3d07642d8d03894a1e08aff3f01477252d00b27bae348d00430334bb0",
+      "configure": "'--prefix=/tmp/branch-mvcc-m9/optimized-install' '--without-icu' '--without-readline' 'CFLAGS=-O2'"
+    }
+  },
+  "final_measurement_settings": {
+    "max_wal_size": "1GB",
+    "min_wal_size": "80MB",
+    "checkpoint_completion_target": "0.9",
+    "shared_buffers": "32MB"
+  },
+  "final_bootstrap_wal_mb": 128,
+  "resource_note": "An artifact refresh exhausted scratch disk; diagnostic log retained. Task-generated scratch files were removed. Final matrix and candidate profile bound bootstrap WAL to 128MB, restoring default settings and checkpointing before timing. Failed attempts excluded.",
+  "candidate_series_note": "optimized.json and optimized-repeat.json are early optimized release iterations. optimized-final.json is the final binary, including cache cleanup, a cold main-identity guard and the non-C branch-name collation correction. All measured fixtures use default C ordering.",
+  "final_binary_configure": "'--prefix=/tmp/branch-mvcc-m9/optimized-install' '--without-icu' '--without-readline' 'CFLAGS=-O2'"
+}

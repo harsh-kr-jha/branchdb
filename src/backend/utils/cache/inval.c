@@ -112,6 +112,8 @@
  */
 #include "postgres.h"
 
+#include "access/branchheap.h"
+
 #include <limits.h>
 
 #include "access/htup_details.h"
@@ -1449,6 +1451,7 @@ CacheInvalidateHeapTupleCommon(Relation relation,
 	 * catalogs; user-relation tuples are never in catcaches and can't affect
 	 * the relcache either.
 	 */
+	BranchCatalogInvalidate(relation);
 	if (!IsCatalogRelation(relation))
 		return;
 

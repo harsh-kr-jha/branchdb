@@ -1,0 +1,1082 @@
+{
+  "platform": "macOS-26.7.1-arm64-arm-64bit-Mach-O",
+  "bindir": "/private/tmp/branch-mvcc-m9/baseline-install/bin",
+  "method": "warm persistent libpq sessions; one warmup then measured repetitions; bootstrap bulk seed",
+  "repetitions": 5,
+  "cases": [
+    {
+      "rows": 1000,
+      "branches": 1,
+      "fork_samples_ms": [],
+      "scalar": {
+        "median_ms": 0.995042,
+        "samples_ms": [
+          0.995042,
+          1.095125,
+          1.019334,
+          0.857875,
+          0.906375
+        ],
+        "result": [
+          {
+            "n": "1"
+          }
+        ]
+      },
+      "heap_point": {
+        "median_ms": 1.049417,
+        "samples_ms": [
+          1.194667,
+          1.104708,
+          1.006334,
+          1.049417,
+          0.97875
+        ],
+        "result": [
+          {
+            "payload": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+          }
+        ]
+      },
+      "heap_scan": {
+        "median_ms": 0.97925,
+        "samples_ms": [
+          1.038083,
+          0.92,
+          0.908542,
+          0.97925,
+          1.056292
+        ],
+        "result": [
+          {
+            "n": "1000"
+          }
+        ]
+      },
+      "branch_point": {
+        "median_ms": 2.190083,
+        "samples_ms": [
+          2.190083,
+          1.904375,
+          2.21525,
+          2.204792,
+          2.148208
+        ],
+        "result": [
+          {
+            "payload": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+          }
+        ]
+      },
+      "branch_scan": {
+        "median_ms": 3.363042,
+        "samples_ms": [
+          3.363042,
+          3.411209,
+          3.52,
+          3.265208,
+          3.135834
+        ],
+        "result": [
+          {
+            "n": "1000"
+          }
+        ]
+      },
+      "branch_update": {
+        "median_ms": 2.976834,
+        "samples_ms": [
+          3.101458,
+          2.998709,
+          2.882375,
+          2.953875,
+          2.976834
+        ],
+        "result": []
+      },
+      "explain": [
+        {
+          "QUERY PLAN": "[\n  {\n    \"Plan\": {\n      \"Node Type\": \"Index Scan\",\n      \"Parallel Aware\": false,\n      \"Async Capable\": false,\n      \"Scan Direction\": \"Forward\",\n      \"Index Name\": \"bench_pkey\",\n      \"Relation Name\": \"bench\",\n      \"Alias\": \"bench\",\n      \"Startup Cost\": 0.28,\n      \"Total Cost\": 8.29,\n      \"Plan Rows\": 1,\n      \"Plan Width\": 33,\n      \"Actual Startup Time\": 1.051,\n      \"Actual Total Time\": 1.052,\n      \"Actual Rows\": 1.00,\n      \"Actual Loops\": 1,\n      \"Disabled\": false,\n      \"Index Cond\": \"(id = 1000)\",\n      \"Rows Removed by Index Recheck\": 0,\n      \"Index Searches\": 1,\n      \"Shared Hit Blocks\": 66,\n      \"Shared Read Blocks\": 0,\n      \"Shared Dirtied Blocks\": 0,\n      \"Shared Written Blocks\": 0,\n      \"Local Hit Blocks\": 0,\n      \"Local Read Blocks\": 0,\n      \"Local Dirtied Blocks\": 0,\n      \"Local Written Blocks\": 0,\n      \"Temp Read Blocks\": 0,\n      \"Temp Written Blocks\": 0\n    },\n    \"Planning\": {\n      \"Shared Hit Blocks\": 0,\n      \"Shared Read Blocks\": 0,\n      \"Shared Dirtied Blocks\": 0,\n      \"Shared Written Blocks\": 0,\n      \"Local Hit Blocks\": 0,\n      \"Local Read Blocks\": 0,\n      \"Local Dirtied Blocks\": 0,\n      \"Local Written Blocks\": 0,\n      \"Temp Read Blocks\": 0,\n      \"Temp Written Blocks\": 0\n    },\n    \"Planning Time\": 0.010,\n    \"Triggers\": [\n    ],\n    \"Execution Time\": 1.055\n  }\n]"
+        }
+      ],
+      "data_bytes": 41444742
+    },
+    {
+      "rows": 1000,
+      "branches": 10,
+      "fork_samples_ms": [
+        25.252583,
+        32.394042,
+        17.379041,
+        22.998042,
+        25.83,
+        23.853041,
+        20.445333,
+        21.073042,
+        19.161667
+      ],
+      "scalar": {
+        "median_ms": 1.468292,
+        "samples_ms": [
+          1.468292,
+          1.493958,
+          1.6235,
+          1.383459,
+          1.316167
+        ],
+        "result": [
+          {
+            "n": "1"
+          }
+        ]
+      },
+      "heap_point": {
+        "median_ms": 1.39125,
+        "samples_ms": [
+          1.39125,
+          1.44575,
+          1.457042,
+          1.37075,
+          1.262375
+        ],
+        "result": [
+          {
+            "payload": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+          }
+        ]
+      },
+      "heap_scan": {
+        "median_ms": 1.403375,
+        "samples_ms": [
+          1.476375,
+          1.37,
+          1.531167,
+          1.388542,
+          1.403375
+        ],
+        "result": [
+          {
+            "n": "1000"
+          }
+        ]
+      },
+      "branch_point": {
+        "median_ms": 2.783375,
+        "samples_ms": [
+          2.783375,
+          2.686417,
+          2.783417,
+          2.675917,
+          2.995959
+        ],
+        "result": [
+          {
+            "payload": "changed"
+          }
+        ]
+      },
+      "branch_scan": {
+        "median_ms": 3.870375,
+        "samples_ms": [
+          3.870375,
+          3.806708,
+          3.725083,
+          3.894125,
+          4.100125
+        ],
+        "result": [
+          {
+            "n": "1000"
+          }
+        ]
+      },
+      "branch_update": {
+        "median_ms": 3.582625,
+        "samples_ms": [
+          3.231083,
+          3.753541,
+          3.635583,
+          3.50325,
+          3.582625
+        ],
+        "result": []
+      },
+      "explain": [
+        {
+          "QUERY PLAN": "[\n  {\n    \"Plan\": {\n      \"Node Type\": \"Index Scan\",\n      \"Parallel Aware\": false,\n      \"Async Capable\": false,\n      \"Scan Direction\": \"Forward\",\n      \"Index Name\": \"bench_pkey\",\n      \"Relation Name\": \"bench\",\n      \"Alias\": \"bench\",\n      \"Startup Cost\": 0.28,\n      \"Total Cost\": 8.29,\n      \"Plan Rows\": 1,\n      \"Plan Width\": 32,\n      \"Actual Startup Time\": 1.169,\n      \"Actual Total Time\": 1.169,\n      \"Actual Rows\": 1.00,\n      \"Actual Loops\": 1,\n      \"Disabled\": false,\n      \"Index Cond\": \"(id = 1000)\",\n      \"Rows Removed by Index Recheck\": 0,\n      \"Index Searches\": 1,\n      \"Shared Hit Blocks\": 66,\n      \"Shared Read Blocks\": 0,\n      \"Shared Dirtied Blocks\": 0,\n      \"Shared Written Blocks\": 0,\n      \"Local Hit Blocks\": 0,\n      \"Local Read Blocks\": 0,\n      \"Local Dirtied Blocks\": 0,\n      \"Local Written Blocks\": 0,\n      \"Temp Read Blocks\": 0,\n      \"Temp Written Blocks\": 0\n    },\n    \"Planning\": {\n      \"Shared Hit Blocks\": 0,\n      \"Shared Read Blocks\": 0,\n      \"Shared Dirtied Blocks\": 0,\n      \"Shared Written Blocks\": 0,\n      \"Local Hit Blocks\": 0,\n      \"Local Read Blocks\": 0,\n      \"Local Dirtied Blocks\": 0,\n      \"Local Written Blocks\": 0,\n      \"Temp Read Blocks\": 0,\n      \"Temp Written Blocks\": 0\n    },\n    \"Planning Time\": 0.010,\n    \"Triggers\": [\n    ],\n    \"Execution Time\": 1.173\n  }\n]"
+        }
+      ],
+      "data_bytes": 41518470
+    },
+    {
+      "rows": 1000,
+      "branches": 100,
+      "fork_samples_ms": [
+        15.970833,
+        14.094667,
+        19.686083,
+        16.759625,
+        15.535958,
+        15.755792,
+        17.870417,
+        15.483333,
+        13.170875,
+        15.937041,
+        19.994417,
+        19.591875,
+        21.0855,
+        17.006041,
+        16.796208,
+        21.962292,
+        17.040875,
+        15.562459,
+        33.41,
+        22.013458,
+        23.251833,
+        18.691125,
+        16.321375,
+        15.979125,
+        13.830417,
+        13.370916,
+        13.906792,
+        16.18275,
+        22.546542,
+        19.848958,
+        16.824875,
+        21.045417,
+        17.920833,
+        48.617292,
+        23.495541,
+        16.021041,
+        17.318542,
+        16.548916,
+        20.629,
+        18.385917,
+        17.499792,
+        17.102583,
+        17.707834,
+        15.723417,
+        14.196042,
+        13.602458,
+        14.40275,
+        17.692417,
+        17.867166,
+        19.034375,
+        16.374584,
+        16.333708,
+        16.446708,
+        14.930417,
+        15.695041,
+        13.874041,
+        13.770667,
+        17.496042,
+        15.260541,
+        16.819875,
+        13.958625,
+        15.841,
+        14.021833,
+        14.436333,
+        14.229625,
+        16.729417,
+        14.822334,
+        16.277125,
+        16.932792,
+        13.702833,
+        14.134583,
+        14.139375,
+        15.659708,
+        15.867708,
+        16.562333,
+        19.167333,
+        16.941667,
+        14.136416,
+        13.4735,
+        13.531916,
+        13.311166,
+        13.894125,
+        15.091625,
+        14.637125,
+        15.076375,
+        13.9865,
+        15.428,
+        14.690416,
+        14.263667,
+        13.913208
+      ],
+      "scalar": {
+        "median_ms": 1.423583,
+        "samples_ms": [
+          1.613625,
+          1.467833,
+          1.423583,
+          1.409083,
+          1.402625
+        ],
+        "result": [
+          {
+            "n": "1"
+          }
+        ]
+      },
+      "heap_point": {
+        "median_ms": 1.427416,
+        "samples_ms": [
+          1.456208,
+          1.427416,
+          1.4335,
+          1.424209,
+          1.420875
+        ],
+        "result": [
+          {
+            "payload": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+          }
+        ]
+      },
+      "heap_scan": {
+        "median_ms": 1.583583,
+        "samples_ms": [
+          1.511417,
+          1.480334,
+          1.583583,
+          1.604417,
+          1.70875
+        ],
+        "result": [
+          {
+            "n": "1000"
+          }
+        ]
+      },
+      "branch_point": {
+        "median_ms": 2.849208,
+        "samples_ms": [
+          3.084666,
+          2.834542,
+          2.849208,
+          2.796459,
+          3.776625
+        ],
+        "result": [
+          {
+            "payload": "changed"
+          }
+        ]
+      },
+      "branch_scan": {
+        "median_ms": 4.519833,
+        "samples_ms": [
+          5.543666,
+          4.492084,
+          4.439625,
+          4.519833,
+          4.805459
+        ],
+        "result": [
+          {
+            "n": "1000"
+          }
+        ]
+      },
+      "branch_update": {
+        "median_ms": 4.70575,
+        "samples_ms": [
+          4.145209,
+          4.011625,
+          5.172042,
+          4.754708,
+          4.70575
+        ],
+        "result": []
+      },
+      "explain": [
+        {
+          "QUERY PLAN": "[\n  {\n    \"Plan\": {\n      \"Node Type\": \"Index Scan\",\n      \"Parallel Aware\": false,\n      \"Async Capable\": false,\n      \"Scan Direction\": \"Forward\",\n      \"Index Name\": \"bench_pkey\",\n      \"Relation Name\": \"bench\",\n      \"Alias\": \"bench\",\n      \"Startup Cost\": 0.28,\n      \"Total Cost\": 8.29,\n      \"Plan Rows\": 1,\n      \"Plan Width\": 32,\n      \"Actual Startup Time\": 1.737,\n      \"Actual Total Time\": 1.738,\n      \"Actual Rows\": 1.00,\n      \"Actual Loops\": 1,\n      \"Disabled\": false,\n      \"Index Cond\": \"(id = 1000)\",\n      \"Rows Removed by Index Recheck\": 0,\n      \"Index Searches\": 1,\n      \"Shared Hit Blocks\": 90,\n      \"Shared Read Blocks\": 0,\n      \"Shared Dirtied Blocks\": 0,\n      \"Shared Written Blocks\": 0,\n      \"Local Hit Blocks\": 0,\n      \"Local Read Blocks\": 0,\n      \"Local Dirtied Blocks\": 0,\n      \"Local Written Blocks\": 0,\n      \"Temp Read Blocks\": 0,\n      \"Temp Written Blocks\": 0\n    },\n    \"Planning\": {\n      \"Shared Hit Blocks\": 0,\n      \"Shared Read Blocks\": 0,\n      \"Shared Dirtied Blocks\": 0,\n      \"Shared Written Blocks\": 0,\n      \"Local Hit Blocks\": 0,\n      \"Local Read Blocks\": 0,\n      \"Local Dirtied Blocks\": 0,\n      \"Local Written Blocks\": 0,\n      \"Temp Read Blocks\": 0,\n      \"Temp Written Blocks\": 0\n    },\n    \"Planning Time\": 0.012,\n    \"Triggers\": [\n    ],\n    \"Execution Time\": 1.742\n  }\n]"
+        }
+      ],
+      "data_bytes": 42395014
+    },
+    {
+      "rows": 100000,
+      "branches": 1,
+      "fork_samples_ms": [],
+      "scalar": {
+        "median_ms": 0.802917,
+        "samples_ms": [
+          0.942333,
+          0.80975,
+          0.802917,
+          0.7665,
+          0.773791
+        ],
+        "result": [
+          {
+            "n": "1"
+          }
+        ]
+      },
+      "heap_point": {
+        "median_ms": 0.766416,
+        "samples_ms": [
+          0.801167,
+          0.786083,
+          0.76325,
+          0.766416,
+          0.755667
+        ],
+        "result": [
+          {
+            "payload": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+          }
+        ]
+      },
+      "heap_scan": {
+        "median_ms": 3.976875,
+        "samples_ms": [
+          4.493209,
+          3.979083,
+          3.976875,
+          3.949708,
+          3.911208
+        ],
+        "result": [
+          {
+            "n": "100000"
+          }
+        ]
+      },
+      "branch_point": {
+        "median_ms": 95.579833,
+        "samples_ms": [
+          111.789958,
+          95.579833,
+          99.42425,
+          90.283875,
+          89.703375
+        ],
+        "result": [
+          {
+            "payload": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+          }
+        ]
+      },
+      "branch_scan": {
+        "timeout_ms": 3000,
+        "completed_samples": 0
+      },
+      "branch_update": {
+        "median_ms": 160.2425,
+        "samples_ms": [
+          144.653542,
+          145.127709,
+          160.2425,
+          179.456208,
+          196.195584
+        ],
+        "result": []
+      },
+      "explain": [
+        {
+          "QUERY PLAN": "[\n  {\n    \"Plan\": {\n      \"Node Type\": \"Index Scan\",\n      \"Parallel Aware\": false,\n      \"Async Capable\": false,\n      \"Scan Direction\": \"Forward\",\n      \"Index Name\": \"bench_pkey\",\n      \"Relation Name\": \"bench\",\n      \"Alias\": \"bench\",\n      \"Startup Cost\": 0.29,\n      \"Total Cost\": 8.31,\n      \"Plan Rows\": 1,\n      \"Plan Width\": 33,\n      \"Actual Startup Time\": 99.678,\n      \"Actual Total Time\": 99.679,\n      \"Actual Rows\": 1.00,\n      \"Actual Loops\": 1,\n      \"Disabled\": false,\n      \"Index Cond\": \"(id = 100000)\",\n      \"Rows Removed by Index Recheck\": 0,\n      \"Index Searches\": 1,\n      \"Shared Hit Blocks\": 1886,\n      \"Shared Read Blocks\": 0,\n      \"Shared Dirtied Blocks\": 0,\n      \"Shared Written Blocks\": 0,\n      \"Local Hit Blocks\": 0,\n      \"Local Read Blocks\": 0,\n      \"Local Dirtied Blocks\": 0,\n      \"Local Written Blocks\": 0,\n      \"Temp Read Blocks\": 540,\n      \"Temp Written Blocks\": 541\n    },\n    \"Planning\": {\n      \"Shared Hit Blocks\": 0,\n      \"Shared Read Blocks\": 0,\n      \"Shared Dirtied Blocks\": 0,\n      \"Shared Written Blocks\": 0,\n      \"Local Hit Blocks\": 0,\n      \"Local Read Blocks\": 0,\n      \"Local Dirtied Blocks\": 0,\n      \"Local Written Blocks\": 0,\n      \"Temp Read Blocks\": 0,\n      \"Temp Written Blocks\": 0\n    },\n    \"Planning Time\": 0.011,\n    \"Triggers\": [\n    ],\n    \"Execution Time\": 99.686\n  }\n]"
+        }
+      ],
+      "data_bytes": 148620678
+    },
+    {
+      "rows": 100000,
+      "branches": 10,
+      "fork_samples_ms": [
+        14.796666,
+        10.044583,
+        9.2015,
+        11.957875,
+        9.481542,
+        9.1655,
+        10.0705,
+        9.278833,
+        9.724875
+      ],
+      "scalar": {
+        "median_ms": 0.82125,
+        "samples_ms": [
+          0.831208,
+          0.794333,
+          0.91375,
+          0.789958,
+          0.82125
+        ],
+        "result": [
+          {
+            "n": "1"
+          }
+        ]
+      },
+      "heap_point": {
+        "median_ms": 0.804875,
+        "samples_ms": [
+          0.837084,
+          0.804875,
+          0.806334,
+          0.777916,
+          0.773916
+        ],
+        "result": [
+          {
+            "payload": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+          }
+        ]
+      },
+      "heap_scan": {
+        "median_ms": 3.919,
+        "samples_ms": [
+          3.929333,
+          3.913667,
+          3.919,
+          3.916125,
+          3.942209
+        ],
+        "result": [
+          {
+            "n": "100000"
+          }
+        ]
+      },
+      "branch_point": {
+        "median_ms": 78.701875,
+        "samples_ms": [
+          95.505875,
+          113.888291,
+          78.701875,
+          72.364084,
+          70.462416
+        ],
+        "result": [
+          {
+            "payload": "changed"
+          }
+        ]
+      },
+      "branch_scan": {
+        "timeout_ms": 3000,
+        "completed_samples": 0
+      },
+      "branch_update": {
+        "median_ms": 171.546708,
+        "samples_ms": [
+          138.302334,
+          260.89975,
+          221.523542,
+          171.546708,
+          162.94475
+        ],
+        "result": []
+      },
+      "explain": [
+        {
+          "QUERY PLAN": "[\n  {\n    \"Plan\": {\n      \"Node Type\": \"Index Scan\",\n      \"Parallel Aware\": false,\n      \"Async Capable\": false,\n      \"Scan Direction\": \"Forward\",\n      \"Index Name\": \"bench_pkey\",\n      \"Relation Name\": \"bench\",\n      \"Alias\": \"bench\",\n      \"Startup Cost\": 0.29,\n      \"Total Cost\": 8.31,\n      \"Plan Rows\": 1,\n      \"Plan Width\": 32,\n      \"Actual Startup Time\": 92.566,\n      \"Actual Total Time\": 92.567,\n      \"Actual Rows\": 1.00,\n      \"Actual Loops\": 1,\n      \"Disabled\": false,\n      \"Index Cond\": \"(id = 100000)\",\n      \"Rows Removed by Index Recheck\": 0,\n      \"Index Searches\": 1,\n      \"Shared Hit Blocks\": 1886,\n      \"Shared Read Blocks\": 0,\n      \"Shared Dirtied Blocks\": 0,\n      \"Shared Written Blocks\": 0,\n      \"Local Hit Blocks\": 0,\n      \"Local Read Blocks\": 0,\n      \"Local Dirtied Blocks\": 0,\n      \"Local Written Blocks\": 0,\n      \"Temp Read Blocks\": 540,\n      \"Temp Written Blocks\": 541\n    },\n    \"Planning\": {\n      \"Shared Hit Blocks\": 0,\n      \"Shared Read Blocks\": 0,\n      \"Shared Dirtied Blocks\": 0,\n      \"Shared Written Blocks\": 0,\n      \"Local Hit Blocks\": 0,\n      \"Local Read Blocks\": 0,\n      \"Local Dirtied Blocks\": 0,\n      \"Local Written Blocks\": 0,\n      \"Temp Read Blocks\": 0,\n      \"Temp Written Blocks\": 0\n    },\n    \"Planning Time\": 0.011,\n    \"Triggers\": [\n    ],\n    \"Execution Time\": 92.573\n  }\n]"
+        }
+      ],
+      "data_bytes": 148694406
+    },
+    {
+      "rows": 100000,
+      "branches": 100,
+      "fork_samples_ms": [
+        10.539375,
+        19.672416,
+        10.277541,
+        12.129958,
+        17.454625,
+        11.180708,
+        9.527708,
+        10.81175,
+        10.23925,
+        15.898291,
+        12.497459,
+        13.463792,
+        21.428834,
+        10.533167,
+        9.352917,
+        9.211584,
+        9.64025,
+        11.20775,
+        18.334167,
+        11.130375,
+        10.190917,
+        10.175833,
+        10.157667,
+        9.916875,
+        9.85675,
+        12.309959,
+        10.29775,
+        9.9385,
+        9.545292,
+        9.619625,
+        9.633416,
+        10.047792,
+        9.515041,
+        9.528916,
+        9.59625,
+        9.380875,
+        10.117917,
+        11.277167,
+        10.396666,
+        10.514625,
+        10.406125,
+        10.173958,
+        9.751459,
+        9.840291,
+        10.391042,
+        10.006167,
+        10.314666,
+        11.145792,
+        9.8085,
+        10.031792,
+        10.127917,
+        9.631209,
+        9.810625,
+        10.124167,
+        10.032583,
+        9.850417,
+        9.739125,
+        9.663083,
+        10.003208,
+        9.706583,
+        9.804208,
+        9.851208,
+        9.718042,
+        9.906667,
+        9.597792,
+        9.588833,
+        10.96125,
+        11.415875,
+        9.984791,
+        9.957792,
+        9.857125,
+        9.940458,
+        10.050792,
+        9.818208,
+        10.340083,
+        9.873667,
+        10.117458,
+        10.01725,
+        9.768791,
+        9.903167,
+        9.740458,
+        9.831041,
+        10.15275,
+        10.218,
+        10.007459,
+        14.218916,
+        10.025666,
+        10.255417,
+        10.069,
+        9.81325
+      ],
+      "scalar": {
+        "median_ms": 1.126959,
+        "samples_ms": [
+          1.214583,
+          1.134208,
+          1.126959,
+          1.09675,
+          1.09825
+        ],
+        "result": [
+          {
+            "n": "1"
+          }
+        ]
+      },
+      "heap_point": {
+        "median_ms": 1.091667,
+        "samples_ms": [
+          1.125084,
+          1.081625,
+          1.090667,
+          1.091667,
+          1.241542
+        ],
+        "result": [
+          {
+            "payload": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+          }
+        ]
+      },
+      "heap_scan": {
+        "median_ms": 4.236458,
+        "samples_ms": [
+          4.285792,
+          4.236458,
+          4.25275,
+          4.221458,
+          4.199167
+        ],
+        "result": [
+          {
+            "n": "100000"
+          }
+        ]
+      },
+      "branch_point": {
+        "median_ms": 76.970792,
+        "samples_ms": [
+          73.279375,
+          76.20625,
+          76.973958,
+          87.795583,
+          76.970792
+        ],
+        "result": [
+          {
+            "payload": "changed"
+          }
+        ]
+      },
+      "branch_scan": {
+        "timeout_ms": 3000,
+        "completed_samples": 0
+      },
+      "branch_update": {
+        "median_ms": 198.606875,
+        "samples_ms": [
+          198.606875,
+          189.332375,
+          205.738583,
+          178.580292,
+          247.758708
+        ],
+        "result": []
+      },
+      "explain": [
+        {
+          "QUERY PLAN": "[\n  {\n    \"Plan\": {\n      \"Node Type\": \"Index Scan\",\n      \"Parallel Aware\": false,\n      \"Async Capable\": false,\n      \"Scan Direction\": \"Forward\",\n      \"Index Name\": \"bench_pkey\",\n      \"Relation Name\": \"bench\",\n      \"Alias\": \"bench\",\n      \"Startup Cost\": 0.29,\n      \"Total Cost\": 8.31,\n      \"Plan Rows\": 1,\n      \"Plan Width\": 32,\n      \"Actual Startup Time\": 92.585,\n      \"Actual Total Time\": 92.587,\n      \"Actual Rows\": 1.00,\n      \"Actual Loops\": 1,\n      \"Disabled\": false,\n      \"Index Cond\": \"(id = 100000)\",\n      \"Rows Removed by Index Recheck\": 0,\n      \"Index Searches\": 1,\n      \"Shared Hit Blocks\": 1909,\n      \"Shared Read Blocks\": 0,\n      \"Shared Dirtied Blocks\": 0,\n      \"Shared Written Blocks\": 0,\n      \"Local Hit Blocks\": 0,\n      \"Local Read Blocks\": 0,\n      \"Local Dirtied Blocks\": 0,\n      \"Local Written Blocks\": 0,\n      \"Temp Read Blocks\": 540,\n      \"Temp Written Blocks\": 541\n    },\n    \"Planning\": {\n      \"Shared Hit Blocks\": 0,\n      \"Shared Read Blocks\": 0,\n      \"Shared Dirtied Blocks\": 0,\n      \"Shared Written Blocks\": 0,\n      \"Local Hit Blocks\": 0,\n      \"Local Read Blocks\": 0,\n      \"Local Dirtied Blocks\": 0,\n      \"Local Written Blocks\": 0,\n      \"Temp Read Blocks\": 0,\n      \"Temp Written Blocks\": 0\n    },\n    \"Planning Time\": 0.014,\n    \"Triggers\": [\n    ],\n    \"Execution Time\": 92.594\n  }\n]"
+        }
+      ],
+      "data_bytes": 149562758
+    },
+    {
+      "rows": 1000000,
+      "branches": 1,
+      "fork_samples_ms": [],
+      "scalar": {
+        "median_ms": 0.921042,
+        "samples_ms": [
+          0.940667,
+          0.807167,
+          0.921042,
+          0.993083,
+          0.80575
+        ],
+        "result": [
+          {
+            "n": "1"
+          }
+        ]
+      },
+      "heap_point": {
+        "median_ms": 0.837042,
+        "samples_ms": [
+          1.161375,
+          0.809209,
+          0.837042,
+          0.876167,
+          0.785917
+        ],
+        "result": [
+          {
+            "payload": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+          }
+        ]
+      },
+      "heap_scan": {
+        "median_ms": 17.655125,
+        "samples_ms": [
+          32.258875,
+          22.169334,
+          17.097,
+          17.655125,
+          17.475625
+        ],
+        "result": [
+          {
+            "n": "1000000"
+          }
+        ]
+      },
+      "branch_point": {
+        "timeout_ms": 3000,
+        "completed_samples": 0
+      },
+      "branch_scan": {
+        "timeout_ms": 3000,
+        "completed_samples": 0
+      },
+      "branch_update": {
+        "timeout_ms": 3000,
+        "completed_samples": 0
+      },
+      "explain": [
+        {
+          "QUERY PLAN": "[\n  {\n    \"Plan\": {\n      \"Node Type\": \"Index Scan\",\n      \"Parallel Aware\": false,\n      \"Async Capable\": false,\n      \"Scan Direction\": \"Forward\",\n      \"Index Name\": \"bench_pkey\",\n      \"Relation Name\": \"bench\",\n      \"Alias\": \"bench\",\n      \"Startup Cost\": 0.42,\n      \"Total Cost\": 8.44,\n      \"Plan Rows\": 1,\n      \"Plan Width\": 33,\n      \"Actual Startup Time\": 1350.132,\n      \"Actual Total Time\": 1350.134,\n      \"Actual Rows\": 1.00,\n      \"Actual Loops\": 1,\n      \"Disabled\": false,\n      \"Index Cond\": \"(id = 1000000)\",\n      \"Rows Removed by Index Recheck\": 0,\n      \"Index Searches\": 1,\n      \"Shared Hit Blocks\": 43,\n      \"Shared Read Blocks\": 18376,\n      \"Shared Dirtied Blocks\": 1,\n      \"Shared Written Blocks\": 1,\n      \"Local Hit Blocks\": 0,\n      \"Local Read Blocks\": 0,\n      \"Local Dirtied Blocks\": 0,\n      \"Local Written Blocks\": 0,\n      \"Temp Read Blocks\": 10772,\n      \"Temp Written Blocks\": 10791\n    },\n    \"Planning\": {\n      \"Shared Hit Blocks\": 0,\n      \"Shared Read Blocks\": 0,\n      \"Shared Dirtied Blocks\": 0,\n      \"Shared Written Blocks\": 0,\n      \"Local Hit Blocks\": 0,\n      \"Local Read Blocks\": 0,\n      \"Local Dirtied Blocks\": 0,\n      \"Local Written Blocks\": 0,\n      \"Temp Read Blocks\": 0,\n      \"Temp Written Blocks\": 0\n    },\n    \"Planning Time\": 0.013,\n    \"Triggers\": [\n    ],\n    \"Execution Time\": 1350.147\n  }\n]"
+        }
+      ],
+      "data_bytes": 1267934598
+    },
+    {
+      "rows": 1000000,
+      "branches": 10,
+      "fork_samples_ms": [
+        27.089333,
+        9.916125,
+        9.204958,
+        9.352417,
+        9.122459,
+        9.161542,
+        10.295125,
+        9.277333,
+        9.869167
+      ],
+      "scalar": {
+        "median_ms": 0.825292,
+        "samples_ms": [
+          0.898916,
+          0.825292,
+          0.832,
+          0.804959,
+          0.796125
+        ],
+        "result": [
+          {
+            "n": "1"
+          }
+        ]
+      },
+      "heap_point": {
+        "median_ms": 0.799875,
+        "samples_ms": [
+          0.807333,
+          0.818041,
+          0.799875,
+          0.794166,
+          0.793084
+        ],
+        "result": [
+          {
+            "payload": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+          }
+        ]
+      },
+      "heap_scan": {
+        "median_ms": 19.270542,
+        "samples_ms": [
+          17.391166,
+          19.299166,
+          19.270542,
+          19.279709,
+          19.239291
+        ],
+        "result": [
+          {
+            "n": "1000000"
+          }
+        ]
+      },
+      "branch_point": {
+        "median_ms": 1404.732042,
+        "samples_ms": [
+          1404.732042,
+          1664.532083,
+          1772.383167,
+          1381.489,
+          1244.272375
+        ],
+        "result": [
+          {
+            "payload": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+          }
+        ]
+      },
+      "branch_scan": {
+        "timeout_ms": 3000,
+        "completed_samples": 0
+      },
+      "branch_update": {
+        "median_ms": 2446.410458,
+        "samples_ms": [
+          2420.545583,
+          2446.410458,
+          2389.788542,
+          2482.468167,
+          2626.076708
+        ],
+        "result": []
+      },
+      "explain": [
+        {
+          "QUERY PLAN": "[\n  {\n    \"Plan\": {\n      \"Node Type\": \"Index Scan\",\n      \"Parallel Aware\": false,\n      \"Async Capable\": false,\n      \"Scan Direction\": \"Forward\",\n      \"Index Name\": \"bench_pkey\",\n      \"Relation Name\": \"bench\",\n      \"Alias\": \"bench\",\n      \"Startup Cost\": 0.42,\n      \"Total Cost\": 8.44,\n      \"Plan Rows\": 1,\n      \"Plan Width\": 32,\n      \"Actual Startup Time\": 1147.223,\n      \"Actual Total Time\": 1147.225,\n      \"Actual Rows\": 1.00,\n      \"Actual Loops\": 1,\n      \"Disabled\": false,\n      \"Index Cond\": \"(id = 1000000)\",\n      \"Rows Removed by Index Recheck\": 0,\n      \"Index Searches\": 1,\n      \"Shared Hit Blocks\": 43,\n      \"Shared Read Blocks\": 18377,\n      \"Shared Dirtied Blocks\": 2,\n      \"Shared Written Blocks\": 2,\n      \"Local Hit Blocks\": 0,\n      \"Local Read Blocks\": 0,\n      \"Local Dirtied Blocks\": 0,\n      \"Local Written Blocks\": 0,\n      \"Temp Read Blocks\": 10772,\n      \"Temp Written Blocks\": 10791\n    },\n    \"Planning\": {\n      \"Shared Hit Blocks\": 0,\n      \"Shared Read Blocks\": 0,\n      \"Shared Dirtied Blocks\": 0,\n      \"Shared Written Blocks\": 0,\n      \"Local Hit Blocks\": 0,\n      \"Local Read Blocks\": 0,\n      \"Local Dirtied Blocks\": 0,\n      \"Local Written Blocks\": 0,\n      \"Temp Read Blocks\": 0,\n      \"Temp Written Blocks\": 0\n    },\n    \"Planning Time\": 0.012,\n    \"Triggers\": [\n    ],\n    \"Execution Time\": 1147.233\n  }\n]"
+        }
+      ],
+      "data_bytes": 1268016518
+    },
+    {
+      "rows": 1000000,
+      "branches": 100,
+      "fork_samples_ms": [
+        31.311417,
+        10.115709,
+        9.870583,
+        9.338375,
+        9.525583,
+        10.113834,
+        9.992666,
+        10.25425,
+        9.793375,
+        10.795542,
+        11.305041,
+        10.153666,
+        9.905125,
+        10.173666,
+        9.503958,
+        9.999333,
+        9.528625,
+        9.256125,
+        9.920333,
+        10.0465,
+        9.818083,
+        9.586875,
+        181.900208,
+        11.522625,
+        9.723166,
+        9.405875,
+        9.634209,
+        9.354459,
+        9.994875,
+        9.913125,
+        9.993166,
+        9.580958,
+        9.467792,
+        9.679667,
+        10.032125,
+        10.280125,
+        10.223834,
+        9.851583,
+        10.001417,
+        9.583209,
+        9.752208,
+        9.391292,
+        9.44775,
+        9.527541,
+        9.95925,
+        9.647083,
+        9.503583,
+        9.464334,
+        9.533167,
+        9.696,
+        9.741875,
+        9.502292,
+        9.890375,
+        9.771125,
+        9.774375,
+        9.715291,
+        9.754333,
+        9.808042,
+        9.917834,
+        9.855792,
+        9.615459,
+        9.603334,
+        9.565667,
+        9.998709,
+        10.631541,
+        10.241542,
+        11.086375,
+        10.140417,
+        9.798833,
+        9.873458,
+        9.976792,
+        9.941,
+        9.785417,
+        10.037958,
+        10.634459,
+        10.518958,
+        10.443167,
+        9.859375,
+        9.681959,
+        9.982792,
+        9.892583,
+        9.839833,
+        9.917958,
+        10.140084,
+        10.231292,
+        9.921792,
+        9.855083,
+        10.092667,
+        10.435208,
+        9.7605
+      ],
+      "scalar": {
+        "median_ms": 1.123541,
+        "samples_ms": [
+          1.2285,
+          1.151333,
+          1.123541,
+          1.094625,
+          1.096208
+        ],
+        "result": [
+          {
+            "n": "1"
+          }
+        ]
+      },
+      "heap_point": {
+        "median_ms": 1.099459,
+        "samples_ms": [
+          1.117042,
+          1.095417,
+          1.129208,
+          1.09475,
+          1.099459
+        ],
+        "result": [
+          {
+            "payload": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+          }
+        ]
+      },
+      "heap_scan": {
+        "median_ms": 22.221625,
+        "samples_ms": [
+          19.788375,
+          18.742458,
+          22.221625,
+          26.79575,
+          23.696417
+        ],
+        "result": [
+          {
+            "n": "1000000"
+          }
+        ]
+      },
+      "branch_point": {
+        "timeout_ms": 3000,
+        "completed_samples": 3
+      },
+      "branch_scan": {
+        "timeout_ms": 3000,
+        "completed_samples": 0
+      },
+      "branch_update": {
+        "timeout_ms": 3000,
+        "completed_samples": 4
+      },
+      "explain": [
+        {
+          "QUERY PLAN": "[\n  {\n    \"Plan\": {\n      \"Node Type\": \"Index Scan\",\n      \"Parallel Aware\": false,\n      \"Async Capable\": false,\n      \"Scan Direction\": \"Forward\",\n      \"Index Name\": \"bench_pkey\",\n      \"Relation Name\": \"bench\",\n      \"Alias\": \"bench\",\n      \"Startup Cost\": 0.42,\n      \"Total Cost\": 8.44,\n      \"Plan Rows\": 1,\n      \"Plan Width\": 32,\n      \"Actual Startup Time\": 1594.640,\n      \"Actual Total Time\": 1594.649,\n      \"Actual Rows\": 1.00,\n      \"Actual Loops\": 1,\n      \"Disabled\": false,\n      \"Index Cond\": \"(id = 1000000)\",\n      \"Rows Removed by Index Recheck\": 0,\n      \"Index Searches\": 1,\n      \"Shared Hit Blocks\": 66,\n      \"Shared Read Blocks\": 18377,\n      \"Shared Dirtied Blocks\": 1,\n      \"Shared Written Blocks\": 2,\n      \"Local Hit Blocks\": 0,\n      \"Local Read Blocks\": 0,\n      \"Local Dirtied Blocks\": 0,\n      \"Local Written Blocks\": 0,\n      \"Temp Read Blocks\": 10772,\n      \"Temp Written Blocks\": 10791\n    },\n    \"Planning\": {\n      \"Shared Hit Blocks\": 0,\n      \"Shared Read Blocks\": 0,\n      \"Shared Dirtied Blocks\": 0,\n      \"Shared Written Blocks\": 0,\n      \"Local Hit Blocks\": 0,\n      \"Local Read Blocks\": 0,\n      \"Local Dirtied Blocks\": 0,\n      \"Local Written Blocks\": 0,\n      \"Temp Read Blocks\": 0,\n      \"Temp Written Blocks\": 0\n    },\n    \"Planning Time\": 0.015,\n    \"Triggers\": [\n    ],\n    \"Execution Time\": 1594.667\n  }\n]"
+        }
+      ],
+      "data_bytes": 1285653894
+    }
+  ]
+}

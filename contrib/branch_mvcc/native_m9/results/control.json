@@ -1,0 +1,73 @@
+{
+  "platform": "macOS-26.7.1-arm64-arm-64bit-Mach-O",
+  "seconds": 2,
+  "rounds": 5,
+  "results": {
+    "scalar": {
+      "samples_tps": {
+        "baseline": [
+          53689.261998,
+          53968.24763,
+          54082.641163,
+          49368.417894,
+          54838.107899
+        ],
+        "candidate": [
+          54792.14671,
+          58988.145772,
+          55066.046315,
+          54125.384868,
+          54315.830451
+        ]
+      },
+      "baseline_median_tps": 53968.24763,
+      "candidate_median_tps": 54792.14671,
+      "candidate_over_baseline": 1.0152663670988273,
+      "passed": true
+    },
+    "heap_point": {
+      "samples_tps": {
+        "baseline": [
+          47159.38295,
+          46739.408627,
+          48431.656176,
+          48141.5749,
+          48459.940859
+        ],
+        "candidate": [
+          47119.835415,
+          47773.172259,
+          47723.563369,
+          48958.19348,
+          47175.63286
+        ]
+      },
+      "baseline_median_tps": 48141.5749,
+      "candidate_median_tps": 47723.563369,
+      "candidate_over_baseline": 0.9913170366389489,
+      "passed": true
+    },
+    "heap_update": {
+      "samples_tps": {
+        "baseline": [
+          20149.877597,
+          19242.5075,
+          20154.740094,
+          19561.632922,
+          19526.498751
+        ],
+        "candidate": [
+          19995.018963,
+          19224.354817,
+          20019.613372,
+          19093.29816,
+          19718.579927
+        ]
+      },
+      "baseline_median_tps": 19561.632922,
+      "candidate_median_tps": 19718.579927,
+      "candidate_over_baseline": 1.0080232057122127,
+      "passed": true
+    }
+  }
+}

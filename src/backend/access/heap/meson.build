@@ -7,6 +7,7 @@ backend_sources += files(
   'branchmaintenance.c',
   'branchcatalog.c',
   'branchheap.c',
+  'branchmeta.c',
   'heapam.c',
   'heapam_handler.c',
   'heapam_indexscan.c',

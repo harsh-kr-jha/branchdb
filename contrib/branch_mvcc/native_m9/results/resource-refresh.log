@@ -1,0 +1,43 @@
+{"rows": 1000, "branches": 1, "branch_point": {"median_ms": 0.054375, "samples_ms": [0.050833, 0.054375, 0.101875, 0.063917, 0.051958], "result": [{"payload": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"}]}, "branch_scan": {"median_ms": 0.352, "samples_ms": [0.344292, 0.356875, 0.477666, 0.34025, 0.352], "result": [{"n": "1000"}]}, "branch_update": {"median_ms": 0.328542, "samples_ms": [0.326958, 0.472916, 0.328542, 0.328, 0.370917], "result": []}}
+{"rows": 1000, "branches": 10, "branch_point": {"median_ms": 0.070916, "samples_ms": [0.092334, 0.072834, 0.0705, 0.070916, 0.068583], "result": [{"payload": "changed"}]}, "branch_scan": {"median_ms": 0.322667, "samples_ms": [0.331667, 0.346583, 0.322667, 0.312, 0.311], "result": [{"n": "1000"}]}, "branch_update": {"median_ms": 0.340084, "samples_ms": [0.344208, 0.329208, 0.357791, 0.339166, 0.340084], "result": []}}
+{"rows": 1000, "branches": 100, "branch_point": {"median_ms": 0.085584, "samples_ms": [0.091542, 0.0865, 0.085083, 0.085584, 0.083584], "result": [{"payload": "changed"}]}, "branch_scan": {"median_ms": 0.344833, "samples_ms": [0.308417, 0.365, 0.415875, 0.344833, 0.32], "result": [{"n": "1000"}]}, "branch_update": {"median_ms": 0.487208, "samples_ms": [0.444875, 0.487208, 0.885125, 0.632708, 0.410375], "result": []}}
+{"rows": 100000, "branches": 1, "branch_point": {"median_ms": 0.056125, "samples_ms": [0.094625, 0.064416, 0.056125, 0.054958, 0.052542], "result": [{"payload": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"}]}, "branch_scan": {"median_ms": 40.514709, "samples_ms": [44.541208, 37.985542, 38.006958, 40.514709, 44.273125], "result": [{"n": "100000"}]}, "branch_update": {"median_ms": 31.130542, "samples_ms": [30.713292, 31.130542, 29.7585, 85.596208, 35.567833], "result": []}}
+{"rows": 100000, "branches": 10, "branch_point": {"median_ms": 0.1105, "samples_ms": [0.13575, 0.103792, 0.0995, 0.1105, 0.114833], "result": [{"payload": "changed"}]}, "branch_scan": {"median_ms": 125.69225, "samples_ms": [82.18775, 120.753041, 125.69225, 130.111542, 193.523959], "result": [{"n": "100000"}]}, "branch_update": {"median_ms": 35.806083, "samples_ms": [36.041958, 45.635458, 32.063583, 35.806083, 33.143333], "result": []}}
+{"rows": 100000, "branches": 100, "branch_point": {"median_ms": 0.095791, "samples_ms": [0.103542, 0.098084, 0.095791, 0.094375, 0.095084], "result": [{"payload": "changed"}]}, "branch_scan": {"median_ms": 50.655292, "samples_ms": [46.74925, 41.086708, 50.655292, 56.459917, 56.386709], "result": [{"n": "100000"}]}, "branch_update": {"median_ms": 39.113583, "samples_ms": [34.223875, 38.839709, 43.073208, 39.113583, 40.586083], "result": []}}
+WARNING:  terminating connection because of crash of another server process
+DETAIL:  The postmaster has commanded this server process to roll back the current transaction and exit, because another server process exited abnormally and possibly corrupted shared memory.
+HINT:  In a moment you should be able to reconnect to the database and repeat your command.
+--- server.log ---
+2026-11-19 18:53:24.755 IST [40360] LOG:  starting PostgreSQL 20devel on aarch64-apple-darwin25.6.0, compiled by Apple clang version 16.0.0 (clang-1600.0.26.6), 64-bit
+2026-11-19 18:53:24.755 IST [40360] LOG:  listening on Unix socket "/tmp/branch-app-nwc1ggj2/.s.PGSQL.58445"
+2026-11-19 18:53:24.759 IST [40365] LOG:  database system was shut down at 2026-11-19 18:53:24 IST
+2026-11-19 18:53:24.761 IST [40360] LOG:  database system is ready to accept connections
+2026-11-19 18:53:43.971 IST [40363] LOG:  checkpoints are occurring too frequently (19 seconds apart)
+2026-11-19 18:53:43.971 IST [40363] HINT:  Consider increasing the configuration parameter "max_wal_size".
+2026-11-19 18:53:43.971 IST [40363] LOG:  checkpoint starting: wal
+2026-11-19 18:53:57.207 IST [40794] PANIC:  could not write to file "pg_wal/xlogtemp.40794": No space left on device
+2026-11-19 18:53:57.207 IST [40794] STATEMENT:  SELECT count(*) AS n FROM heap_bench
+2026-11-19 18:53:57.247 IST [40360] LOG:  background worker "parallel worker" (PID 40794) was terminated by signal 6: Abort trap: 6
+2026-11-19 18:53:57.247 IST [40360] DETAIL:  Failed process was running: SELECT count(*) AS n FROM heap_bench
+2026-11-19 18:53:57.247 IST [40360] LOG:  terminating any other active server processes
+2026-11-19 18:53:57.276 IST [40360] LOG:  received immediate shutdown request
+2026-11-19 18:53:57.313 IST [40360] LOG:  abnormal database system shutdown
+2026-11-19 18:53:57.335 IST [40360] LOG:  database system is shut down
+
+Traceback (most recent call last):
+  File "/Users/sunday/Documents/Life-Workspace/02_Projects/Tamaso/db/postgres/contrib/branch_mvcc/native_m9/bench.py", line 108, in <module>
+    main()
+    ~~~~^^
+  File "/Users/sunday/Documents/Life-Workspace/02_Projects/Tamaso/db/postgres/contrib/branch_mvcc/native_m9/bench.py", line 90, in main
+    case['heap_scan'] = measure(heap,'SELECT count(*) AS n FROM heap_bench',args.repetitions,args.timeout_ms)
+                        ~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/sunday/Documents/Life-Workspace/02_Projects/Tamaso/db/postgres/contrib/branch_mvcc/native_m9/bench.py", line 47, in measure
+    result = db.execute(query)
+  File "/Users/sunday/Documents/Life-Workspace/02_Projects/Tamaso/db/postgres/contrib/branch_mvcc/native_m9/../native_m5/db.py", line 129, in execute
+    return self._result(self.lib.PQexecParams(self.handle, sql.encode(), len(encoded),
+           ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+                                             None, values, None, None, 0))
+                                             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/sunday/Documents/Life-Workspace/02_Projects/Tamaso/db/postgres/contrib/branch_mvcc/native_m9/../native_m5/db.py", line 116, in _result
+    raise DatabaseError(message.decode(), state.decode())
+db.DatabaseError: database operation failed

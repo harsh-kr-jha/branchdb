@@ -1,0 +1,245 @@
+Analysis of sampling postgres (pid 24586) every 1 millisecond
+Process:         postgres [24586]
+Path:            /private/tmp/*/postgres
+Load Address:    0x1005ec000
+Identifier:      postgres
+Version:         0
+Code Type:       ARM64
+Platform:        macOS
+Parent Process:  postgres [24294]
+Target Type:     live task
+
+Date/Time:       2026-11-19 18:41:44.581 +0530
+Launch Time:     2026-11-19 18:41:44.419 +0530
+OS Version:      macOS 26.7.1 (25G241)
+Report Version:  7
+Analysis Tool:   /usr/bin/sample
+
+Physical footprint:         45.8M
+Physical footprint (peak):  45.8M
+Idle exit:                  untracked
+----
+
+Call graph:
+    701 Thread_5716429   DispatchQueue_1: com.apple.main-thread  (serial)
+      701 start  (in dyld) + 6992  [0x18bfb84e4]
+        701 main  (in postgres) + 832  [0x1007ea98c]
+          701 PostmasterMain  (in postgres) + 3252  [0x1008c59f4]
+            701 ServerLoop  (in postgres) + 6068  [0x1008c7ed0]
+              701 postmaster_child_launch  (in postgres) + 324  [0x1008c3ae8]
+                701 BackendMain  (in postgres) + 80  [0x100963910]
+                  701 PostgresMain  (in postgres) + 8372  [0x100969374]
+                    701 PortalRun  (in postgres) + 472  [0x10096b5c4]
+                      701 PortalRunSelect  (in postgres) + 224  [0x10096b904]
+                        701 standard_ExecutorRun  (in postgres) + 288  [0x10079d03c]
+                          701 ExecAgg  (in postgres) + 1308  [0x1007b0258]
+                            701 fetch_input_tuple  (in postgres) + 112  [0x1007b1d80]
+                              701 ExecSeqScan  (in postgres) + 172  [0x1007cb48c]
+                                701 branch_begin  (in postgres) + 252  [0x1006340c8]
+                                  701 BranchInternalQuery  (in postgres) + 248  [0x100630274]
+                                    701 SPI_execute_snapshot  (in postgres) + 344  [0x1007d6428]
+                                      701 _SPI_execute_plan  (in postgres) + 1412  [0x1007d5cd0]
+                                        701 standard_ExecutorRun  (in postgres) + 288  [0x10079d03c]
+                                          701 ExecUnique  (in postgres) + 108  [0x1007d0404]
+                                            500 ExecSort  (in postgres) + 528  [0x1007ccc80]
+                                            + 484 ExecScan  (in postgres) + 336  [0x1007a6524]
+                                            + ! 483 BitmapHeapNext  (in postgres) + 452  [0x1007b4c50]
+                                            + ! : 465 heapam_scan_bitmap_next_tuple  (in postgres) + 280  [0x100641830]
+                                            + ! : | 463 heap_page_prune_opt  (in postgres) + 356  [0x100647894]
+                                            + ! : | + 459 heap_page_prune_and_freeze  (in postgres) + 828  [0x100647c60]
+                                            + ! : | + ! 456 HeapTupleSatisfiesVacuumHorizon  (in postgres) + 224  [0x100642eac]
+                                            + ! : | + ! : 453 BufferSetHintBits16  (in postgres) + 108  [0x100931710]
+                                            + ! : | + ! : | 451 MarkSharedBufferDirtyHint  (in postgres) + 256  [0x10093074c]
+                                            + ! : | + ! : | + 446 XLogInsert  (in postgres) + 2004  [0x100694394]
+                                            + ! : | + ! : | + ! 446 XLogInsertRecord  (in postgres) + 1080  [0x100687318]
+                                            + ! : | + ! : | + !   446 GetXLogBuffer  (in postgres) + 312  [0x10069196c]
+                                            + ! : | + ! : | + !     444 AdvanceXLInsertBuffer  (in postgres) + 120  [0x1006892c4]
+                                            + ! : | + ! : | + !     : 342 XLogWrite  (in postgres) + 300  [0x100688a48]
+                                            + ! : | + ! : | + !     : | 342 XLogFileInit  (in postgres) + 44  [0x100689654]
+                                            + ! : | + ! : | + !     : |   326 XLogFileInitInternal  (in postgres) + 472  [0x1006898f0]
+                                            + ! : | + ! : | + !     : |   + 326 pg_pwrite_zeros  (in postgres) + 100  [0x100ae56d4]
+                                            + ! : | + ! : | + !     : |   +   326 pg_pwritev_with_retry  (in postgres) + 196  [0x100ae5600]
+                                            + ! : | + ! : | + !     : |   +     326 pwritev  (in libsystem_kernel.dylib) + 8  [0x18c34ebfc]
+                                            + ! : | + ! : | + !     : |   16 XLogFileInitInternal  (in postgres) + 640  [0x100689998]
+                                            + ! : | + ! : | + !     : |     16 pg_fsync  (in postgres) + 96  [0x1009379e8]
+                                            + ! : | + ! : | + !     : |       16 fsync  (in libsystem_kernel.dylib) + 8  [0x18c343804]
+                                            + ! : | + ! : | + !     : 102 XLogWrite  (in postgres) + 592  [0x100688b6c]
+                                            + ! : | + ! : | + !     :   102 pwrite  (in libsystem_kernel.dylib) + 8  [0x18c343430]
+                                            + ! : | + ! : | + !     1 AdvanceXLInsertBuffer  (in postgres) + 392  [0x1006893d4]
+                                            + ! : | + ! : | + !     : 1 LWLockAcquire  (in postgres) + 308  [0x100955c24]
+                                            + ! : | + ! : | + !     :   1 PGSemaphoreLock  (in postgres) + 52  [0x1008ba134]
+                                            + ! : | + ! : | + !     :     1 semop  (in libsystem_kernel.dylib) + 8  [0x18c34ee0c]
+                                            + ! : | + ! : | + !     1 AdvanceXLInsertBuffer  (in postgres) + 488  [0x100689434]
+                                            + ! : | + ! : | + !       1 _platform_memset  (in libsystem_platform.dylib) + 156  [0x18c38d12c]
+                                            + ! : | + ! : | + 4 XLogInsert  (in postgres) + 1904  [0x100694330]
+                                            + ! : | + ! : | + ! 4 pg_comp_crc32c_armv8  (in postgres) + 120  [0x100af3084]
+                                            + ! : | + ! : | + 1 XLogInsert  (in postgres) + 44  [0x100693bec]
+                                            + ! : | + ! : | +   1 ___chkstk_darwin  (in libsystem_pthread.dylib) + 52  [0x18c37ec54]
+                                            + ! : | + ! : | 1 MarkSharedBufferDirtyHint  (in postgres) + 272  [0x10093075c]
+                                            + ! : | + ! : | + 1 LockBufHdr  (in postgres) + 0  [0x10092e5a8]
+                                            + ! : | + ! : | 1 MarkSharedBufferDirtyHint  (in postgres) + 96  [0x1009306ac]
+                                            + ! : | + ! : 1 BufferSetHintBits16  (in postgres) + 76  [0x1009316f0]
+                                            + ! : | + ! : | 1 SharedBufferBeginSetHintBits  (in postgres) + 28  [0x1009315a8]
+                                            + ! : | + ! : 1 SetHintBits  (in postgres) + 44  [0x100642970]
+                                            + ! : | + ! : 1 XLogNeedsFlush  (in postgres) + 340  [0x100689620]
+                                            + ! : | + ! 2 HeapTupleSatisfiesVacuumHorizon  (in postgres) + 84  [0x100642e20]
+                                            + ! : | + ! : 2 TransactionIdIsCurrentTransactionId  (in postgres) + 120,164  [0x100682978,0x1006829a4]
+                                            + ! : | + ! 1 HeapTupleSatisfiesVacuumHorizon  (in postgres) + 228  [0x100642eb0]
+                                            + ! : | + 4 heap_page_prune_and_freeze  (in postgres) + 1280,692,...  [0x100647e24,0x100647bd8,...]
+                                            + ! : | 1 heap_page_prune_opt  (in postgres) + 392  [0x1006478b8]
+                                            + ! : | + 1 PageGetHeapFreeSpace  (in postgres) + 0  [0x10095e698]
+                                            + ! : | 1 heap_page_prune_opt  (in postgres) + 428  [0x1006478dc]
+                                            + ! : |   1 RecordPageWithFreeSpace  (in postgres) + 76  [0x10093d308]
+                                            + ! : |     1 fsm_readbuf  (in postgres) + 224  [0x10093d600]
+                                            + ! : |       1 ReadBufferExtended  (in postgres) + 144  [0x10092a4f8]
+                                            + ! : |         1 StartReadBuffer  (in postgres) + 296  [0x10092c2b8]
+                                            + ! : |           1 LWLockAcquire  (in postgres) + 28  [0x100955b0c]
+                                            + ! : 16 heapam_scan_bitmap_next_tuple  (in postgres) + 188  [0x1006417d4]
+                                            + ! : | 16 read_stream_next_buffer  (in postgres) + 660  [0x100928bdc]
+                                            + ! : |   16 read_stream_look_ahead  (in postgres) + 476  [0x100928efc]
+                                            + ! : |     16 read_stream_start_pending_read  (in postgres) + 376  [0x100929224]
+                                            + ! : |       15 StartReadBuffers  (in postgres) + 640  [0x10092be58]
+                                            + ! : |       + 15 GetVictimBuffer  (in postgres) + 464  [0x100933c3c]
+                                            + ! : |       +   14 FlushBuffer  (in postgres) + 228  [0x10092fe10]
+                                            + ! : |       +   ! 14 smgrwritev  (in postgres) + 60  [0x100962be8]
+                                            + ! : |       +   !   14 mdwritev  (in postgres) + 272  [0x100960f1c]
+                                            + ! : |       +   !     14 FileWriteV  (in postgres) + 380  [0x100939e58]
+                                            + ! : |       +   !       14 pwrite  (in libsystem_kernel.dylib) + 8  [0x18c343430]
+                                            + ! : |       +   1 FlushBuffer  (in postgres) + 184  [0x10092fde4]
+                                            + ! : |       +     1 PageSetChecksum  (in postgres) + 72  [0x10095f0a0]
+                                            + ! : |       +       1 pg_checksum_page  (in postgres) + 44  [0x10095f104]
+                                            + ! : |       +         1 pg_checksum_block_fallback  (in postgres) + 180  [0x10095f200]
+                                            + ! : |       1 StartReadBuffers  (in postgres) + 412  [0x10092bd74]
+                                            + ! : |         1 BufTableLookup  (in postgres) + 36  [0x1009295ec]
+                                            + ! : |           1 hash_search_with_hash_value  (in postgres) + 600  [0x100aadf60]
+                                            + ! : 1 heapam_scan_bitmap_next_tuple  (in postgres) + 420  [0x1006418bc]
+                                            + ! : | 1 heap_hot_search_buffer  (in postgres) + 368  [0x1006421dc]
+                                            + ! : |   1 HeapTupleSatisfiesMVCC  (in postgres) + 36  [0x1006431b0]
+                                            + ! : |     1 BranchCatalogVisible  (in postgres) + 24  [0x100631710]
+                                            + ! : 1 heapam_scan_bitmap_next_tuple  (in postgres) + 888  [0x100641a90]
+                                            + ! :   1 ExecStoreBufferHeapTuple  (in postgres) + 48  [0x1007a8eac]
+                                            + ! 1 BitmapHeapNext  (in postgres) + 536  [0x1007b4ca4]
+                                            + 8 ExecScan  (in postgres) + 536  [0x1007a65ec]
+                                            + ! 5 ExecInterpExpr  (in postgres) + 80,452,...  [0x100794b7c,0x100794cf0,...]
+                                            + ! 3 ExecInterpExpr  (in postgres) + 232  [0x100794c14]
+                                            + !   3 tts_buffer_heap_getsomeattrs  (in postgres) + 428,20  [0x1007a8168,0x1007a7fd0]
+                                            + 5 ExecScan  (in postgres) + 392  [0x1007a655c]
+                                            + ! 3 ExecInterpExpr  (in postgres) + 232  [0x100794c14]
+                                            + ! : 3 tts_buffer_heap_getsomeattrs  (in postgres) + 76,396,...  [0x1007a8008,0x1007a8148,...]
+                                            + ! 1 ExecInterpExpr  (in postgres) + 464  [0x100794cfc]
+                                            + ! 1 tts_buffer_heap_getsomeattrs  (in postgres) + 1424  [0x1007a854c]
+                                            + 2 ExecScan  (in postgres) + 112,348  [0x1007a6444,0x1007a6530]
+                                            + 1 ExecInterpExpr  (in postgres) + 6988  [0x100796678]
+                                            201 ExecSort  (in postgres) + 500  [0x1007ccc64]
+                                              180 tuplesort_puttupleslot  (in postgres) + 204  [0x100ad7634]
+                                              ! 178 tuplesort_puttuple_common  (in postgres) + 1648  [0x100ad21d0]
+                                              ! : 177 dumptuples  (in postgres) + 444  [0x100ad2560]
+                                              ! : | 157 writetup_heap  (in postgres) + 80  [0x100ad557c]
+                                              ! : | + 152 LogicalTapeWrite  (in postgres) + 200  [0x100acf6b0]
+                                              ! : | + ! 148 ltsWriteBlock  (in postgres) + 160  [0x100acf9d4]
+                                              ! : | + ! : 147 BufFileWrite  (in postgres) + 100  [0x100936d68]
+                                              ! : | + ! : | 147 BufFileDumpBuffer  (in postgres) + 504  [0x100936fd0]
+                                              ! : | + ! : |   147 FileWriteV  (in postgres) + 380  [0x100939e58]
+                                              ! : | + ! : |     147 pwrite  (in libsystem_kernel.dylib) + 8  [0x18c343430]
+                                              ! : | + ! : 1 BufFileWrite  (in postgres) + 156  [0x100936da0]
+                                              ! : | + ! :   1 _platform_memmove  (in libsystem_platform.dylib) + 0  [0x18c38d360]
+                                              ! : | + ! 4 ltsWriteBlock  (in postgres) + 116  [0x100acf9a8]
+                                              ! : | + !   4 ltsWriteBlock  (in postgres) + 160  [0x100acf9d4]
+                                              ! : | + !     4 BufFileWrite  (in postgres) + 100  [0x100936d68]
+                                              ! : | + !       4 BufFileDumpBuffer  (in postgres) + 504  [0x100936fd0]
+                                              ! : | + !         4 FileWriteV  (in postgres) + 380  [0x100939e58]
+                                              ! : | + !           4 pwrite  (in libsystem_kernel.dylib) + 8  [0x18c343430]
+                                              ! : | + 3 LogicalTapeWrite  (in postgres) + 36,76,...  [0x100acf60c,0x100acf634,...]
+                                              ! : | + 2 LogicalTapeWrite  (in postgres) + 260  [0x100acf6ec]
+                                              ! : | +   2 _platform_memmove  (in libsystem_platform.dylib) + 12,460  [0x18c38d36c,0x18c38d52c]
+                                              ! : | 15 writetup_heap  (in postgres) + 64  [0x100ad556c]
+                                              ! : | + 14 LogicalTapeWrite  (in postgres) + 200  [0x100acf6b0]
+                                              ! : | + ! 14 ltsWriteBlock  (in postgres) + 160  [0x100acf9d4]
+                                              ! : | + !   14 BufFileWrite  (in postgres) + 100  [0x100936d68]
+                                              ! : | + !     14 BufFileDumpBuffer  (in postgres) + 504  [0x100936fd0]
+                                              ! : | + !       14 FileWriteV  (in postgres) + 380  [0x100939e58]
+                                              ! : | + !         14 pwrite  (in libsystem_kernel.dylib) + 8  [0x18c343430]
+                                              ! : | + 1 LogicalTapeWrite  (in postgres) + 260  [0x100acf6ec]
+                                              ! : | +   1 _platform_memmove  (in libsystem_platform.dylib) + 436  [0x18c38d514]
+                                              ! : | 4 LogicalTapeWrite  (in postgres) + 300,304  [0x100acf714,0x100acf718]
+                                              ! : | 1 writetup_heap  (in postgres) + 44  [0x100ad5558]
+                                              ! : 1 dumptuples  (in postgres) + 312  [0x100ad24dc]
+                                              ! :   1 tuplesort_sort_memtuples  (in postgres) + 612  [0x100ad2cf4]
+                                              ! 2 tuplesort_puttuple_common  (in postgres) + 52,360  [0x100ad1b94,0x100ad1cc8]
+                                              19 tuplesort_puttupleslot  (in postgres) + 72  [0x100ad75b0]
+                                              ! 7 heap_form_minimal_tuple  (in postgres) + 200  [0x1005fdef4]
+                                              ! : 7 heap_compute_data_size  (in postgres) + 124,408,...  [0x1005fba24,0x1005fbb40,...]
+                                              ! 6 heap_form_minimal_tuple  (in postgres) + 212  [0x1005fdf00]
+                                              ! : 4 palloc0  (in postgres) + 128  [0x100acc244]
+                                              ! : | 3 _platform_memset  (in libsystem_platform.dylib) + 200,180  [0x18c38d158,0x18c38d144]
+                                              ! : | 1 DYLD-STUB$$bzero  (in postgres) + 4  [0x100b949c0]
+                                              ! : 2 palloc0  (in postgres) + 48  [0x100acc1f4]
+                                              ! :   2 BumpAlloc  (in postgres) + 8,40  [0x100ac4ec4,0x100ac4ee4]
+                                              ! 4 heap_form_minimal_tuple  (in postgres) + 360  [0x1005fdf94]
+                                              ! : 4 fill_val  (in postgres) + 152,104  [0x1005fbd10,0x1005fbce0]
+                                              ! 1 heap_form_minimal_tuple  (in postgres) + 272  [0x1005fdf3c]
+                                              ! 1 palloc0  (in postgres) + 136  [0x100acc24c]
+                                              1 tuplesort_puttupleslot  (in postgres) + 128  [0x100ad75e8]
+                                              ! 1 heap_getattr  (in postgres) + 180  [0x100ad7704]
+                                              1 tuplesort_puttupleslot  (in postgres) + 180  [0x100ad761c]
+
+Total number in stack (recursive counted multiple, when >=5):
+        5       pwrite  (in libsystem_kernel.dylib) + 0  [0x18c343428]
+
+Sort by top of stack, same collapsed (when >= 5):
+        pwritev  (in libsystem_kernel.dylib)        326
+        pwrite  (in libsystem_kernel.dylib)        281
+        fsync  (in libsystem_kernel.dylib)        16
+        ExecInterpExpr  (in postgres)        7
+        LogicalTapeWrite  (in postgres)        7
+        heap_compute_data_size  (in postgres)        7
+        tts_buffer_heap_getsomeattrs  (in postgres)        7
+
+Binary Images:
+       0x1005ec000 -        0x100db3b17 +postgres (0) <B50809F1-B94F-3BBC-8287-21738F471B9E> /tmp/*/postgres
+       0x18bf10000 -        0x18bf62b4b  libobjc.A.dylib (951.7) <1D62B376-2303-376A-B993-9432A2004EB6> /usr/lib/libobjc.A.dylib
+       0x18bf63000 -        0x18bf97d58  libdyld.dylib (1387) <70073E6E-4CDD-314F-BBDF-EC7FF6CE2DFC> /usr/lib/system/libdyld.dylib
+       0x18bf98000 -        0x18c04b4ff  dyld (1.0.0 - 1387) <0263B88E-0B22-3B33-BBC0-483BE879B513> /usr/lib/dyld
+       0x18c04c000 -        0x18c04f228  libsystem_blocks.dylib (96) <B33F1440-9364-38E4-AF85-8A21BFF24324> /usr/lib/system/libsystem_blocks.dylib
+       0x18c050000 -        0x18c0a455f  libxpc.dylib (3102.160.5) <E26A36A6-4B8F-321C-AE17-54353F9EEE84> /usr/lib/system/libxpc.dylib
+       0x18c0a5000 -        0x18c0c59ff  libsystem_trace.dylib (1861.160.4) <314A8A89-4715-32B9-ABC2-B3087149C8B7> /usr/lib/system/libsystem_trace.dylib
+       0x18c0c6000 -        0x18c1745f7  libcorecrypto.dylib (1922.160.10) <057A41E9-2A2E-39CD-B198-387734EED870> /usr/lib/system/libcorecrypto.dylib
+       0x18c175000 -        0x18c1c5257  libsystem_malloc.dylib (812.160.5) <B7ED74D2-5A24-3F39-9296-EE5688FF4B63> /usr/lib/system/libsystem_malloc.dylib
+       0x18c1c6000 -        0x18c20d23f  libdispatch.dylib (1542.160.2) <80E75F3F-333F-38A8-A3DD-6279FCDB771B> /usr/lib/system/libdispatch.dylib
+       0x18c20e000 -        0x18c210ffb  libsystem_featureflags.dylib (103) <5725BCFE-07F3-3629-9B44-551A435E2DE2> /usr/lib/system/libsystem_featureflags.dylib
+       0x18c211000 -        0x18c2921e7  libsystem_c.dylib (1752.160.4) <3498CA79-EF40-3587-AD44-75187CEE7D95> /usr/lib/system/libsystem_c.dylib
+       0x18c293000 -        0x18c323ae7  libc++.1.dylib (2100.43) <32327062-C3A2-389E-ABFE-68A9942422E3> /usr/lib/libc++.1.dylib
+       0x18c324000 -        0x18c33e75f  libc++abi.dylib (2100.43) <CCDE1614-20B7-354C-B201-99C5C4CC589D> /usr/lib/libc++abi.dylib
+       0x18c33f000 -        0x18c37c2f7  libsystem_kernel.dylib (12377.161.15.700.19) <EE805B14-29F2-360D-9A2C-3221A1211833> /usr/lib/system/libsystem_kernel.dylib
+       0x18c37d000 -        0x18c389b3b  libsystem_pthread.dylib (539.100.4) <A58BEABD-7AC0-35F8-BCFF-E4FFBD79E938> /usr/lib/system/libsystem_pthread.dylib
+       0x18c38a000 -        0x18c392963  libsystem_platform.dylib (375.120.2) <3AF14164-15FE-3623-9EE3-46DE29FD5B5A> /usr/lib/system/libsystem_platform.dylib
+       0x18c393000 -        0x18c3c26eb  libsystem_info.dylib (600) <0037F576-2C50-36F0-9F36-6CB7A049D5B1> /usr/lib/system/libsystem_info.dylib
+       0x190363000 -        0x19036ce5f  libsystem_darwin.dylib (1752.160.4) <B808D04B-2798-36C9-96F6-35534BDFCF11> /usr/lib/system/libsystem_darwin.dylib
+       0x1907ce000 -        0x1907e01b6  libsystem_notify.dylib (348.160.3) <922BDCF4-CD33-3EEB-BC56-9DCAE54F8F65> /usr/lib/system/libsystem_notify.dylib
+       0x192a9f000 -        0x192ab9f7b  libsystem_networkextension.dylib (2226.161.1.700.2) <83F224A4-40C4-3106-A97B-788D1D961DCB> /usr/lib/system/libsystem_networkextension.dylib
+       0x192b3c000 -        0x192b53fdf  libsystem_asl.dylib (406) <FF6BE113-1093-3D23-8A55-E0A5B327CA8E> /usr/lib/system/libsystem_asl.dylib
+       0x1946f5000 -        0x1946fd387  libsystem_symptoms.dylib (2169.160.3.701.1) <7F0D4E31-268A-3EBB-8A2C-30CCC771A5A5> /usr/lib/system/libsystem_symptoms.dylib
+       0x19899a000 -        0x1989d2373  libsystem_containermanager.dylib (725.160.3.701.2) <118BC21E-B17D-32A2-9B65-16256131974F> /usr/lib/system/libsystem_containermanager.dylib
+       0x199dac000 -        0x199db05d7  libsystem_configuration.dylib (1405.160.3.701.3) <7725D903-1D37-33E7-82AF-2260661C81A8> /usr/lib/system/libsystem_configuration.dylib
+       0x199db1000 -        0x199db799f  libsystem_sandbox.dylib (2680.160.6.700.3) <7B54AAA3-EB32-3853-8F0E-EB956EC957A1> /usr/lib/system/libsystem_sandbox.dylib
+       0x19b40c000 -        0x19b40f1fb  libquarantine.dylib (196.160.2.700.3) <45146171-F0C1-3104-AE01-6AAD841A70B5> /usr/lib/system/libquarantine.dylib
+       0x19bbab000 -        0x19bbb1d03  libsystem_coreservices.dylib (191.5.1) <BF51842C-BC69-3725-9EB2-7A52804963F8> /usr/lib/system/libsystem_coreservices.dylib
+       0x19c12b000 -        0x19c139d97  libz.1.dylib (100.120.1) <E4DB2DC8-3F00-308A-BFB5-65F71CB7D0D1> /usr/lib/libz.1.dylib
+       0x19c13a000 -        0x19c177a77  libsystem_m.dylib (3312.100.1) <A2858495-5B01-3D11-955D-FF6F25E88A6E> /usr/lib/system/libsystem_m.dylib
+       0x19c179000 -        0x19c17c527  libmacho.dylib (1387) <95DEC6C1-4480-3303-8A52-9AFC3D8C9219> /usr/lib/system/libmacho.dylib
+       0x19c196000 -        0x19c1a33a7  libcommonCrypto.dylib (600035) <EBA6E4D0-4DD2-33BB-BF95-48A58591AAAD> /usr/lib/system/libcommonCrypto.dylib
+       0x19c1a4000 -        0x19c1adca3  libunwind.dylib (2100.2) <201827AE-90B0-38B1-9729-50455B607293> /usr/lib/system/libunwind.dylib
+       0x19c1b6000 -        0x19c1c0c1f  libcopyfile.dylib (240.160.2.702.1) <BA7266A8-BF4B-32BF-A323-F4B2EBCDC0B0> /usr/lib/system/libcopyfile.dylib
+       0x19c1c1000 -        0x19c1c4987  libcompiler_rt.dylib (103.3) <9EE26D98-97BF-3BE0-B6BE-425284AB2D24> /usr/lib/system/libcompiler_rt.dylib
+       0x19c1c5000 -        0x19c1c978b  libsystem_collections.dylib (1752.160.4) <34CEFA68-1E15-32F2-A5B1-97C0170A77C5> /usr/lib/system/libsystem_collections.dylib
+       0x19c1ca000 -        0x19c1cd4cf  libsystem_secinit.dylib (168.100.7) <B6B286B6-6E08-3578-8AFC-E4C55697C760> /usr/lib/system/libsystem_secinit.dylib
+       0x19c1ce000 -        0x19c1d0bf7  libremovefile.dylib (85.100.6) <33530415-3DB6-3556-A59A-24C22681D632> /usr/lib/system/libremovefile.dylib
+       0x19c1d1000 -        0x19c1d1f27  libkeymgr.dylib (31) <AD45B9EE-CE2B-3E1F-B96B-15F7F9FA3712> /usr/lib/system/libkeymgr.dylib
+       0x19c1d2000 -        0x19c1dae3f  libsystem_dnssd.dylib (2881.160.4.700.1) <71833E65-58B3-3C06-A4F3-D69D476CCC3C> /usr/lib/system/libsystem_dnssd.dylib
+       0x19c1db000 -        0x19c1e009b  libcache.dylib (95) <A13AF0DC-5928-38BE-97FF-E04C29EF96AF> /usr/lib/system/libcache.dylib
+       0x19c1e1000 -        0x19c1e2ce3  libSystem.B.dylib (1356) <E9E4C9A6-16BB-392C-96AA-07797764E2A1> /usr/lib/libSystem.B.dylib
+       0x28feb9000 -        0x28fec0349  libRosetta.dylib (367.9) <3DBB2990-262D-3776-8FAC-B88C0373DCF0> /usr/lib/libRosetta.dylib
+       0x291acc000 -        0x291acfa4b  libsystem_darwindirectory.dylib (122) <6246210A-5279-391D-8F58-E62A87CAB309> /usr/lib/system/libsystem_darwindirectory.dylib
+       0x291ad0000 -        0x291ada39b  libsystem_eligibility.dylib (319.160.17) <85C0486B-60BE-3E10-ABBF-DD74341B7376> /usr/lib/system/libsystem_eligibility.dylib
+       0x291adb000 -        0x291ae288b  libsystem_sanitizers.dylib (26.1) <A8C4F7FC-3443-35F7-B306-068D06237ED0> /usr/lib/system/libsystem_sanitizers.dylib
+       0x291ae3000 -        0x291ae3bbf  libsystem_trial.dylib (474.2.18.2.1) <83FF8DEB-1153-35BA-99C3-2AEF9B7559CD> /usr/lib/system/libsystem_trial.dylib

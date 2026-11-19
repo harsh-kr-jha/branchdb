@@ -7,6 +7,8 @@
  */
 #include "postgres.h"
 #include "access/branchheap.h"
+#include "access/branchmeta.h"
+#include "utils/hsearch.h"
 #include "access/heapam.h"
 #include "access/parallel.h"
 #include "access/tableam_indexscan.h"
@@ -30,46 +32,53 @@
 #include "utils/inval.h"
 #include "utils/snapmgr.h"
 
-char *BranchName = NULL;
+char	   *BranchName = NULL;
 static const TableAmRoutine *heap;
 static TableAmRoutine methods;
 
-typedef struct BranchContext
+typedef struct BranchTidEntry
 {
-	int64 id;
-	int64 cutoff;
-} BranchContext;
-
-typedef struct BranchVersion
-{
-	int64 id;
-	int64 root;
 	ItemPointerData tid;
-	bool deleted;
-} BranchVersion;
+	BranchVersion version;
+} BranchTidEntry;
+
+typedef struct BranchRootEntry
+{
+	int64		root;
+	BranchVersion version;
+} BranchRootEntry;
 
 typedef struct BranchScan
 {
 	TableScanDescData base;
 	TableScanDesc inner;
-	int count;
-	BranchVersion *versions;
+	MemoryContext map_context;
+	HTAB	   *tids;
 } BranchScan;
 
-/* Prepared before B-tree locks. Never access SPI/catalogs from fetch_tid. */
+typedef struct BranchIndex
+{
+	BranchContext branch;
+} BranchIndex;
+
+typedef struct DirtyMap
+{
+	Oid			relid;
+	RelFileNumber generation;
+	Oid			root;
+	MemoryContext context;
+	HTAB	   *tids;
+} DirtyMap;
+
+/* Prepared outside user B-tree locks. No metadata access in fetch_tid. */
 static MemoryContext dirty_context;
-static BranchVersion *dirty_versions;
-static int dirty_count;
-static Oid dirty_relid;
-static RelFileNumber dirty_generation;
+static HTAB *dirty_maps;
 
 static void
 reset_dirty(void)
 {
 	dirty_context = NULL;
-	dirty_versions = NULL;
-	dirty_count = 0;
-	dirty_relid = InvalidOid;
+	dirty_maps = NULL;
 }
 
 static void
@@ -82,7 +91,8 @@ static void
 dirty_subxact(SubXactEvent event, SubTransactionId child,
 			  SubTransactionId parent, void *arg)
 {
-	/* The old memory is owned by the top transaction and freed there. */
+	if (dirty_context)
+		MemoryContextDelete(dirty_context);
 	reset_dirty();
 }
 
@@ -90,13 +100,13 @@ static void
 unsupported(const char *operation)
 {
 	ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-						errmsg("branch_heap prototype does not support %s", operation)));
+					errmsg("branch_heap prototype does not support %s", operation)));
 }
 
 static void
 admission(LOCKMODE mode)
 {
-	LOCKTAG tag;
+	LOCKTAG		tag;
 
 	if (BranchLifecycleEnabled && MyProcPort != NULL && BranchLifecycleSessionId() < 0)
 		ereport(FATAL, (errcode(ERRCODE_INVALID_AUTHORIZATION_SPECIFICATION), errmsg("reconnect after native lifecycle initialization")));
@@ -110,7 +120,7 @@ admission(LOCKMODE mode)
 	if (mode == ExclusiveLock && !LockHeldByMe(&tag, ExclusiveLock, false) && LockHeldByMe(&tag, ShareLock, false))
 		unsupported("fork after accessing branch tables in the same transaction");
 	if (!LockHeldByMe(&tag, mode, true))
-		{
+	{
 		LockAcquire(&tag, mode, false, false);
 		if (BranchLifecycleEnabled && mode == ShareLock)
 		{
@@ -120,8 +130,10 @@ admission(LOCKMODE mode)
 	}
 }
 
-/* Explicit snapshots prevent SPI from accidentally replacing an outer scan's
- * statement snapshot. The metadata tables themselves always use normal heap. */
+/*
+ * Explicit snapshots prevent SPI from accidentally replacing an outer scan's
+ * statement snapshot. The metadata tables themselves always use normal heap.
+ */
 static void
 query(const char *sql, Snapshot snapshot, bool readonly)
 {
@@ -131,8 +143,8 @@ query(const char *sql, Snapshot snapshot, bool readonly)
 static int64
 number(HeapTuple tuple, TupleDesc desc, int column)
 {
-	bool isnull;
-	Datum d = SPI_getbinval(tuple, desc, column, &isnull);
+	bool		isnull;
+	Datum		d = SPI_getbinval(tuple, desc, column, &isnull);
 
 	if (isnull)
 		elog(ERROR, "null branch metadata");
@@ -142,16 +154,7 @@ number(HeapTuple tuple, TupleDesc desc, int column)
 static BranchContext
 context(void)
 {
-	BranchContext b;
-
-	query(psprintf("SELECT id, cutoff FROM branch_native.branches WHERE name = %s",
-				   quote_literal_cstr(BranchName)), GetLatestSnapshot(), true);
-	if (SPI_processed != 1)
-		ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT),
-						errmsg("unknown native branch \"%s\"", BranchName)));
-	b.id = number(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, 1);
-	b.cutoff = number(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, 2);
-	return b;
+	return BranchMetaContext();
 }
 
 static void
@@ -162,32 +165,18 @@ check_relation(Relation rel)
 		unsupported("temporary/unlogged tables or triggers");
 	if (rel->trigdesc)
 	{
-		int i;
-		for(i=0;i<rel->trigdesc->numtriggers;i++)
-			if (!rel->trigdesc->triggers[i].tgisinternal) unsupported("user-defined triggers");
+		int			i;
+
+		for (i = 0; i < rel->trigdesc->numtriggers; i++)
+			if (!rel->trigdesc->triggers[i].tgisinternal)
+				unsupported("user-defined triggers");
 	}
-}
-
-static char *
-relation_filter(Relation rel)
-{
-	return psprintf("relid = %u AND generation = " UINT64_FORMAT,
-					BranchStorageRelation(RelationGetRelid(rel)), (uint64) rel->rd_locator.relNumber);
-}
-
-static char *
-visible_filter(BranchContext b)
-{
-	if (b.id == 0)
-		return pstrdup("branch = 0");
-	return psprintf("(branch = " INT64_FORMAT " OR (branch = 0 AND id <= " INT64_FORMAT "))",
-					b.id, b.cutoff);
 }
 
 static void
 writer_lock(BranchContext b)
 {
-	LOCKTAG tag;
+	LOCKTAG		tag;
 
 	SET_LOCKTAG_ADVISORY(tag, MyDatabaseId, 0x42524e43, (uint32) b.id, 2);
 	tag.locktag_lockmethodid = NATIVE_LOCKMETHOD;
@@ -195,46 +184,92 @@ writer_lock(BranchContext b)
 		LockAcquire(&tag, ExclusiveLock, false, false);
 }
 
-/* Metadata scan outside buffer content locks. Retained physical versions have
- * no global xmax: normal heap MVCC plus this mapping supplies visibility. */
+static HTAB *
+tid_map(MemoryContext context)
+{
+	HASHCTL		ctl = {0};
+
+	ctl.keysize = sizeof(ItemPointerData);
+	ctl.entrysize = sizeof(BranchTidEntry);
+	ctl.hcxt = context;
+	return hash_create("native selected TIDs", 1024, &ctl, HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
+}
+
+static bool
+selected(HTAB *map, ItemPointer tid)
+{
+	return hash_search(map, tid, HASH_FIND, NULL) != NULL;
+}
+
+static void
+add_tid(const BranchVersion *version, void *arg)
+{
+	HTAB	   *map = arg;
+	BranchTidEntry *entry;
+
+	if (version->deleted)
+		return;
+	entry = hash_search(map, &version->tid, HASH_ENTER, NULL);
+	entry->version = *version;
+}
+
+typedef struct SelectRoots
+{
+	HTAB	   *roots;
+	BranchContext branch;
+} SelectRoots;
+
+static void
+select_root(const BranchVersion *version, void *arg)
+{
+	SelectRoots *selection = arg;
+	bool		found;
+	BranchRootEntry *entry = hash_search(selection->roots, &version->root, HASH_ENTER, &found);
+
+	if (!found || (version->branch == selection->branch.id && entry->version.branch != selection->branch.id) ||
+		(version->branch == entry->version.branch && version->id > entry->version.id))
+		entry->version = *version;
+}
+
+static HTAB *
+load_tids(Relation rel, Snapshot snapshot, MemoryContext context)
+{
+	HASHCTL		ctl = {0};
+	SelectRoots selection;
+	HASH_SEQ_STATUS sequence;
+	BranchRootEntry *entry;
+	HTAB	   *tids = tid_map(context);
+
+	ctl.keysize = sizeof(int64);
+	ctl.entrysize = sizeof(BranchRootEntry);
+	ctl.hcxt = context;
+	selection.roots = hash_create("native selected roots", 1024, &ctl, HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
+	selection.branch = BranchMetaContext();
+	BranchMetaVisit(rel, snapshot, selection.branch, 0, select_root, &selection);
+	hash_seq_init(&sequence, selection.roots);
+	while ((entry = hash_seq_search(&sequence)) != NULL)
+		add_tid(&entry->version, tids);
+	hash_destroy(selection.roots);
+	return tids;
+}
+
+/*
+ * Statement maps use the caller's snapshot and cannot change as a writer
+ * commits. Indexed reads use targeted metadata lookups instead of this map.
+ */
 static TableScanDesc
 branch_begin(Relation rel, Snapshot snapshot, int nkeys, ScanKeyData *key,
 			 ParallelTableScanDesc parallel, uint32 flags)
 {
 	BranchScan *scan;
-	BranchContext b;
-	MemoryContext caller = CurrentMemoryContext;
-	uint64 i;
 
 	admission(ShareLock);
 	check_relation(rel);
-	if (parallel || !IsMVCCSnapshot(snapshot) ||
-		!(flags & SO_TYPE_SEQSCAN))
+	if (parallel || !IsMVCCSnapshot(snapshot) || !(flags & SO_TYPE_SEQSCAN))
 		unsupported("nonsequential or non-MVCC scans");
 	scan = palloc0(sizeof(*scan));
-	SPI_connect();
-	b = context();
-	query(psprintf("SELECT DISTINCT ON (root_id) id, root_id, block, offset_no, deleted "
-				   "FROM branch_native.versions WHERE %s AND %s "
-				   "ORDER BY root_id, (branch = " INT64_FORMAT ") DESC, id DESC",
-				   relation_filter(rel), visible_filter(b), b.id), snapshot, true);
-	scan->count = SPI_processed;
-	scan->versions = MemoryContextAllocZero(caller, sizeof(BranchVersion) * Max(scan->count, 1));
-	for (i = 0; i < SPI_processed; i++)
-	{
-		HeapTuple t = SPI_tuptable->vals[i];
-		TupleDesc d = SPI_tuptable->tupdesc;
-		bool isnull;
-		BranchVersion *v = &scan->versions[i];
-
-		v->id = number(t, d, 1);
-		v->root = number(t, d, 2);
-		v->deleted = DatumGetBool(SPI_getbinval(t, d, 5, &isnull));
-		if (!v->deleted)
-			ItemPointerSet(&v->tid, (BlockNumber) number(t, d, 3),
-							(OffsetNumber) number(t, d, 4));
-	}
-	SPI_finish();
+	scan->map_context = AllocSetContextCreate(CurrentMemoryContext, "native statement visibility", ALLOCSET_DEFAULT_SIZES);
+	scan->tids = load_tids(rel, snapshot, scan->map_context);
 	scan->inner = heap->scan_begin(rel, snapshot, nkeys, key, NULL, flags);
 	scan->base = *scan->inner;
 	return &scan->base;
@@ -244,16 +279,11 @@ static bool
 branch_next(TableScanDesc desc, ScanDirection direction, TupleTableSlot *slot)
 {
 	BranchScan *scan = (BranchScan *) desc;
-	int i;
 
 	scan->inner->rs_instrument = desc->rs_instrument;
 	while (heap->scan_getnextslot(scan->inner, direction, slot))
-	{
-		for (i = 0; i < scan->count; i++)
-			if (!scan->versions[i].deleted &&
-				ItemPointerEquals(&scan->versions[i].tid, &slot->tts_tid))
-				return true;
-	}
+		if (selected(scan->tids, &slot->tts_tid))
+			return true;
 	return false;
 }
 
@@ -263,7 +293,7 @@ branch_end(TableScanDesc desc)
 	BranchScan *scan = (BranchScan *) desc;
 
 	heap->scan_end(scan->inner);
-	pfree(scan->versions);
+	MemoryContextDelete(scan->map_context);
 	pfree(scan);
 }
 
@@ -276,55 +306,72 @@ branch_rescan(TableScanDesc desc, ScanKeyData *key, bool set,
 	heap->scan_rescan(scan->inner, key, set, strat, sync, pagemode);
 }
 
-static bool
-selected(BranchVersion *versions, int count, ItemPointer tid)
+static DirtyMap *
+prepare_dirty(Relation rel)
 {
-	int i;
+	DirtyMap   *map;
+	Oid			id = RelationGetRelid(rel);
+	Oid			root = BranchStorageRelation(id);
+	bool		found;
+	BranchContext b;
 
-	for (i = 0; i < count; i++)
-		if (!versions[i].deleted && ItemPointerEquals(&versions[i].tid, tid))
-			return true;
-	return false;
+	/*
+	 * A cached map was built under the private writer lock, which remains
+	 * held until transaction end. Only our own version changes can affect it.
+	 */
+	map = dirty_maps ? hash_search(dirty_maps, &id, HASH_FIND, NULL) : NULL;
+	if (map && map->generation == rel->rd_locator.relNumber && map->root == root)
+		return map;
+	b = context();
+	writer_lock(b);
+	if (!dirty_maps)
+	{
+		HASHCTL		ctl = {0};
+
+		dirty_context = AllocSetContextCreate(TopTransactionContext, "native writer visibility", ALLOCSET_DEFAULT_SIZES);
+		ctl.keysize = sizeof(Oid);
+		ctl.entrysize = sizeof(DirtyMap);
+		ctl.hcxt = dirty_context;
+		dirty_maps = hash_create("native writer relations", 16, &ctl, HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
+	}
+	map = hash_search(dirty_maps, &id, HASH_ENTER, &found);
+	if (!found || map->generation != rel->rd_locator.relNumber || map->root != root)
+	{
+		if (found)
+			MemoryContextDelete(map->context);
+		map->context = AllocSetContextCreate(dirty_context, "native writer relation", ALLOCSET_DEFAULT_SIZES);
+		map->generation = rel->rd_locator.relNumber;
+		map->root = root;
+		map->tids = load_tids(rel, GetLatestSnapshot(), map->context);
+	}
+	return map;
 }
 
 static void
-prepare_dirty(Relation rel)
+forget_tid(Relation rel, ItemPointer tid)
 {
-	MemoryContext old;
-	BranchScan *scan;
+	DirtyMap   *map = prepare_dirty(rel);
 
-	if (dirty_context)
-		MemoryContextDelete(dirty_context);
-	reset_dirty();
-	dirty_context = AllocSetContextCreate(TopTransactionContext,
-										 "branch uniqueness", ALLOCSET_DEFAULT_SIZES);
-	old = MemoryContextSwitchTo(dirty_context);
-	scan = (BranchScan *) branch_begin(rel, GetLatestSnapshot(), 0, NULL, NULL, SO_TYPE_SEQSCAN);
-	dirty_count = scan->count;
-	dirty_versions = palloc(sizeof(BranchVersion) * Max(dirty_count, 1));
-	memcpy(dirty_versions, scan->versions, sizeof(BranchVersion) * dirty_count);
-	branch_end(&scan->base);
-	dirty_relid = RelationGetRelid(rel);
-	dirty_generation = rel->rd_locator.relNumber;
-	MemoryContextSwitchTo(old);
+	hash_search(map->tids, tid, HASH_REMOVE, NULL);
 }
 
 static bool
 branch_fetch_tid(Relation rel, ItemPointer tid, Snapshot snapshot, bool *all_dead)
 {
-	/* A sibling-hidden or superseded tuple is NOT globally dead. */
+	Oid			id = RelationGetRelid(rel);
+	DirtyMap   *map = dirty_maps ? hash_search(dirty_maps, &id, HASH_FIND, NULL) : NULL;
+
 	if (all_dead)
 		*all_dead = false;
-	if ((snapshot->snapshot_type != SNAPSHOT_DIRTY && snapshot != SnapshotSelf) ||
-		!dirty_context || dirty_relid != RelationGetRelid(rel) ||
-		dirty_generation != rel->rd_locator.relNumber)
+	if ((snapshot->snapshot_type != SNAPSHOT_DIRTY && snapshot != SnapshotSelf) || !map ||
+		map->generation != rel->rd_locator.relNumber)
 		unsupported("constraint lookup without a prepared branch snapshot");
 	if (snapshot->snapshot_type == SNAPSHOT_DIRTY)
 	{
 		snapshot->xmin = snapshot->xmax = InvalidTransactionId;
 		snapshot->speculativeToken = 0;
 	}
-	if (!selected(dirty_versions, dirty_count, tid))
+	if (!selected(map->tids, tid))
 		return false;
 	return heap->fetch_tid(rel, tid, snapshot, NULL);
 }
@@ -332,48 +379,38 @@ branch_fetch_tid(Relation rel, ItemPointer tid, Snapshot snapshot, bool *all_dea
 static int64
 reserve_id(void)
 {
-	query("SELECT nextval('branch_native.version_ids')", GetLatestSnapshot(), false);
-	return number(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, 1);
+	return BranchMetaReserve();
 }
 
 static void
 record_version(Relation rel, BranchContext b, int64 id, int64 root,
 			   int64 predecessor, ItemPointer tid)
 {
-	query(psprintf("INSERT INTO branch_native.versions "
-				   "(id, root_id, predecessor, branch, relid, generation, block, offset_no, deleted) "
-				   "VALUES (" INT64_FORMAT "," INT64_FORMAT "," INT64_FORMAT "," INT64_FORMAT
-				   ",%u," UINT64_FORMAT ",%u,%u,%s)",
-				   id, root, predecessor, b.id, BranchStorageRelation(RelationGetRelid(rel)),
-				   (uint64) rel->rd_locator.relNumber,
-				   tid ? ItemPointerGetBlockNumber(tid) : 0,
-				   tid ? ItemPointerGetOffsetNumber(tid) : 0,
-				   tid ? "false" : "true"), GetLatestSnapshot(), false);
+	DirtyMap   *map;
+	Oid			relid = RelationGetRelid(rel);
+
+	BranchMetaInsert(rel, b, id, root, predecessor, tid);
+	map = dirty_maps ? hash_search(dirty_maps, &relid, HASH_FIND, NULL) : NULL;
+	if (map && tid)
+	{
+		BranchVersion v = {0};
+
+		v.id = id;
+		v.root = root;
+		v.branch = b.id;
+		v.tid = *tid;
+		add_tid(&v, map->tids);
+	}
 }
 
 static BranchVersion
 validate_old(Relation rel, BranchContext b, ItemPointer tid)
 {
-	BranchVersion v;
-	int64 current;
+	BranchVersion version;
 
-	query(psprintf("SELECT id, root_id FROM branch_native.versions WHERE %s "
-				   "AND NOT deleted AND block = %u AND offset_no = %u",
-				   relation_filter(rel), ItemPointerGetBlockNumber(tid),
-				   ItemPointerGetOffsetNumber(tid)), GetLatestSnapshot(), true);
-	if (SPI_processed != 1)
-		ereport(ERROR,(errcode(ERRCODE_T_R_SERIALIZATION_FAILURE),
-					errmsg("native branch version was retired; retry transaction")));
-	v.id = number(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, 1);
-	v.root = number(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, 2);
-	query(psprintf("SELECT id FROM branch_native.versions WHERE %s AND root_id = " INT64_FORMAT
-				   " AND %s ORDER BY (branch = " INT64_FORMAT ") DESC, id DESC LIMIT 1",
-				   relation_filter(rel), v.root, visible_filter(b), b.id), GetLatestSnapshot(), true);
-	current = SPI_processed ? number(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, 1) : 0;
-	if (current != v.id)
-		ereport(ERROR, (errcode(ERRCODE_T_R_SERIALIZATION_FAILURE),
-						errmsg("native branch row changed concurrently; retry transaction")));
-	return v;
+	if (!BranchMetaVisibleTid(rel, GetLatestSnapshot(), b, tid, &version))
+		ereport(ERROR, (errcode(ERRCODE_T_R_SERIALIZATION_FAILURE), errmsg("native branch row changed or was retired; retry transaction")));
+	return version;
 }
 
 static void
@@ -381,18 +418,18 @@ branch_insert(Relation rel, TupleTableSlot *slot, CommandId cid, uint32 options,
 			  BulkInsertState bistate)
 {
 	BranchContext b;
-	int64 id;
+	int64		id;
 
 	admission(ShareLock);
 	check_relation(rel);
-	SPI_connect();
+
 	b = context();
 	writer_lock(b);
+	prepare_dirty(rel);
 	id = reserve_id();
 	heap->tuple_insert(rel, slot, cid, options, bistate);
 	record_version(rel, b, id, id, 0, &slot->tts_tid);
-	SPI_finish();
-	prepare_dirty(rel);
+
 }
 
 static TM_Result
@@ -402,19 +439,20 @@ branch_update(Relation rel, ItemPointer old, TupleTableSlot *slot, CommandId cid
 {
 	BranchContext b;
 	BranchVersion v;
-	int64 id;
+	int64		id;
 
 	admission(ShareLock);
 	check_relation(rel);
-	SPI_connect();
+
 	b = context();
 	writer_lock(b);
+	prepare_dirty(rel);
 	v = validate_old(rel, b, old);
+	forget_tid(rel, old);
 	id = reserve_id();
 	heap->tuple_insert(rel, slot, cid, 0, NULL);
 	record_version(rel, b, id, v.root, v.id, &slot->tts_tid);
-	SPI_finish();
-	prepare_dirty(rel);
+
 	*mode = LockTupleExclusive;
 	*indexes = TU_All;
 	return TM_Ok;
@@ -426,17 +464,19 @@ branch_delete(Relation rel, ItemPointer tid, CommandId cid, uint32 options,
 {
 	BranchContext b;
 	BranchVersion v;
-	int64 id;
+	int64		id;
 
 	admission(ShareLock);
 	check_relation(rel);
-	SPI_connect();
+
 	b = context();
 	writer_lock(b);
+	prepare_dirty(rel);
 	v = validate_old(rel, b, tid);
+	forget_tid(rel, tid);
 	id = reserve_id();
 	record_version(rel, b, id, v.root, v.id, NULL);
-	SPI_finish();
+
 	return TM_Ok;
 }
 
@@ -463,14 +503,14 @@ branch_speculative(Relation rel, TupleTableSlot *slot, CommandId cid,
 		unsupported("ON CONFLICT / speculative insert");
 	admission(ShareLock);
 	check_relation(rel);
-	SPI_connect();
+
 	b = context();
 	writer_lock(b);
+	prepare_dirty(rel);
 	id = reserve_id();
 	heap->tuple_insert_speculative(rel, slot, cid, options, bistate, token);
 	record_version(rel, b, id, id, 0, &slot->tts_tid);
-	SPI_finish();
-	prepare_dirty(rel);
+
 }
 
 static void
@@ -479,11 +519,11 @@ branch_complete_speculative(Relation rel, TupleTableSlot *slot, uint32 token, bo
 	heap->tuple_complete_speculative(rel, slot, token, succeeded);
 	if (!succeeded)
 	{
-		SPI_connect();
-		query(psprintf("DELETE FROM branch_native.versions WHERE %s AND block=%u AND offset_no=%u", relation_filter(rel), ItemPointerGetBlockNumber(&slot->tts_tid), ItemPointerGetOffsetNumber(&slot->tts_tid)), GetLatestSnapshot(), false);
-		SPI_finish();
+
+		BranchMetaRemove(rel, &slot->tts_tid);
+		forget_tid(rel, &slot->tts_tid);
+
 	}
-	prepare_dirty(rel);
 }
 
 void
@@ -493,24 +533,29 @@ BranchPrepareWrite(Relation rel)
 
 	admission(ShareLock);
 	check_relation(rel);
-	SPI_connect();
+
 	b = context();
 	writer_lock(b);
-	SPI_finish();
+
 	prepare_dirty(rel);
 }
 
 static bool
 branch_index_next(IndexScanDesc scan, ScanDirection direction, TupleTableSlot *slot)
 {
-	BranchScan *mapping = (BranchScan *) scan->xs_table_opaque;
+	BranchIndex *state = scan->xs_table_opaque;
+	Snapshot	snapshot = scan->xs_snapshot;
+	Snapshot	metadata_snapshot = snapshot->snapshot_type == SNAPSHOT_DIRTY ? GetLatestSnapshot() : snapshot;
 
 	while (tableam_index_getnext_tid(scan, direction))
 	{
-		/* Never set kill_prior_tuple for branch-local invisibility. */
-		if (selected(mapping->versions, mapping->count, &scan->xs_heaptid) &&
-			heap->tuple_fetch_row_version(scan->heapRelation, &scan->xs_heaptid,
-									   scan->xs_snapshot, slot))
+		/*
+		 * The user index has released its content lock before returning a
+		 * TID. A pin may remain; typed metadata lookups take no user-index
+		 * locks.
+		 */
+		if (BranchMetaVisibleTid(scan->heapRelation, metadata_snapshot, state->branch, &scan->xs_heaptid, NULL) &&
+			heap->tuple_fetch_row_version(scan->heapRelation, &scan->xs_heaptid, snapshot, slot))
 			return true;
 	}
 	ExecClearTuple(slot);
@@ -520,24 +565,28 @@ branch_index_next(IndexScanDesc scan, ScanDirection direction, TupleTableSlot *s
 static void
 branch_index(IndexScanDesc scan, uint32 flags)
 {
+	BranchIndex *state;
+
 	if (scan->xs_want_itup || scan->indexRelation->rd_rel->relam != BTREE_AM_OID)
 		unsupported("index-only or non-B-tree scans");
-	scan->xs_table_opaque = branch_begin(scan->heapRelation,
-										 BranchSchemaEnabled && scan->xs_snapshot->snapshot_type == SNAPSHOT_DIRTY ? GetLatestSnapshot() : scan->xs_snapshot,
-										 0, NULL, NULL, SO_TYPE_SEQSCAN);
+	admission(ShareLock);
+	check_relation(scan->heapRelation);
+	state = palloc(sizeof(*state));
+	state->branch = context();
+	scan->xs_table_opaque = state;
 	scan->xs_getnext_slot = branch_index_next;
 }
 
 static void
 branch_index_reset(IndexScanDesc scan)
 {
-	/* Rescans/mark restores share the original statement's mapping. */
+	/* Index rescans retain the original snapshot and branch context. */
 }
 
 static void
 branch_index_end(IndexScanDesc scan)
 {
-	branch_end((TableScanDesc) scan->xs_table_opaque);
+	pfree(scan->xs_table_opaque);
 }
 
 static TM_Result
@@ -551,13 +600,13 @@ branch_lock(Relation rel, ItemPointer tid, Snapshot snapshot, TupleTableSlot *sl
 		unsupported("row locking / EvalPlanQual");
 	admission(ShareLock);
 	check_relation(rel);
-	SPI_connect();
+
 	b = context();
 	if (policy != LockWaitBlock)
 		unsupported("NOWAIT/SKIP LOCKED row locking");
 	writer_lock(b);
 	(void) validate_old(rel, b, tid);
-	SPI_finish();
+
 	MemSet(failure, 0, sizeof(*failure));
 	if (!heap->tuple_fetch_row_version(rel, tid, SnapshotAny, slot))
 		ereport(ERROR, (errcode(ERRCODE_T_R_SERIALIZATION_FAILURE), errmsg("native row was retired; retry transaction")));
@@ -569,9 +618,11 @@ branch_satisfies_snapshot(Relation rel, TupleTableSlot *slot, Snapshot snapshot)
 {
 	if (BranchSchemaEnabled && snapshot == SnapshotSelf)
 	{
+		DirtyMap   *map;
+
 		CommandCounterIncrement();
-		prepare_dirty(rel);
-		if (!selected(dirty_versions, dirty_count, &slot->tts_tid))
+		map = prepare_dirty(rel);
+		if (!selected(map->tids, &slot->tts_tid))
 			return false;
 	}
 	return heap->tuple_satisfies_snapshot(rel, slot, snapshot);
@@ -581,30 +632,17 @@ static bool
 branch_fetch(Relation rel, ItemPointer tid, Snapshot snapshot, TupleTableSlot *slot)
 {
 	Snapshot	visible;
-	TableScanDesc desc;
-	BranchScan *scan;
-	bool		found = false;
-	int			i;
+	BranchContext b;
 
-	/*
-	 * AFTER triggers need physical transition images, including obsolete
-	 * ones. The subsequent SnapshotSelf check decides whether an FK event is
-	 * live.
-	 */
 	if (BranchSchemaEnabled && snapshot == SnapshotAny)
 		return heap->tuple_fetch_row_version(rel, tid, snapshot, slot);
+	admission(ShareLock);
+	check_relation(rel);
+	b = context();
 	visible = IsMVCCSnapshot(snapshot) ? snapshot : GetActiveSnapshot();
-	desc = branch_begin(rel, visible, 0, NULL, NULL, SO_TYPE_SEQSCAN);
-	scan = (BranchScan *) desc;
-
-	for (i = 0; i < scan->count; i++)
-		if (!scan->versions[i].deleted && ItemPointerEquals(&scan->versions[i].tid, tid))
-		{
-			found = heap->tuple_fetch_row_version(rel, tid, snapshot, slot);
-			break;
-		}
-	branch_end(desc);
-	return found;
+	if (!BranchMetaVisibleTid(rel, visible, b, tid, NULL))
+		return false;
+	return heap->tuple_fetch_row_version(rel, tid, snapshot, slot);
 }
 
 static void
@@ -623,9 +661,7 @@ branch_index_build(Relation rel, Relation index, IndexInfo *info, bool sync,
 	EState	   *estate;
 	Snapshot	snapshot;
 	double		count = 0;
-	BranchVersion *history = NULL;
-	int			history_count = 0;
-	MemoryContext caller = CurrentMemoryContext;
+	HTAB	   *history = NULL;
 
 	/*
 	 * Index every retained committed version so old statement snapshots
@@ -656,17 +692,8 @@ branch_index_build(Relation rel, Relation index, IndexInfo *info, bool sync,
 	ownscan = branch_begin(rel, snapshot, 0, NULL, NULL, SO_TYPE_SEQSCAN);
 	if (BranchSchemaEnabled)
 	{
-		BranchContext b;
-		uint64		i;
-
-		SPI_connect();
-		b = context();
-		query(psprintf("SELECT block,offset_no FROM branch_native.versions WHERE %s AND %s AND NOT deleted", relation_filter(rel), visible_filter(b)), snapshot, true);
-		history_count = SPI_processed;
-		history = MemoryContextAllocZero(caller, sizeof(BranchVersion) * Max(history_count, 1));
-		for (i = 0; i < SPI_processed; i++)
-			ItemPointerSet(&history[i].tid, (BlockNumber) number(SPI_tuptable->vals[i], SPI_tuptable->tupdesc, 1), (OffsetNumber) number(SPI_tuptable->vals[i], SPI_tuptable->tupdesc, 2));
-		SPI_finish();
+		history = tid_map(CurrentMemoryContext);
+		BranchMetaVisit(rel, snapshot, context(), 0, add_tid, history);
 	}
 
 	while (heap->scan_getnextslot(((BranchScan *) ownscan)->inner, ForwardScanDirection, slot))
@@ -680,20 +707,19 @@ branch_index_build(Relation rel, Relation index, IndexInfo *info, bool sync,
 		 * snapshots; only the selected current view participates in unique
 		 * checks.
 		 */
-		if (BranchSchemaEnabled && !selected(history, history_count, &slot->tts_tid))
+		if (BranchSchemaEnabled && !selected(history, &slot->tts_tid))
 		{
 			ExecClearTuple(slot);
 			continue;
 		}
 		FormIndexDatum(info, slot, estate, values, isnull);
 		callback(index, &slot->tts_tid, values, isnull,
-				 selected(((BranchScan *) ownscan)->versions,
-						  ((BranchScan *) ownscan)->count, &slot->tts_tid), state);
+				 selected(((BranchScan *) ownscan)->tids, &slot->tts_tid), state);
 		count++;
 		ExecClearTuple(slot);
 	}
 	if (history)
-		pfree(history);
+		hash_destroy(history);
 	branch_end(ownscan);
 	UnregisterSnapshot(snapshot);
 	ExecDropSingleTupleTableSlot(slot);
@@ -747,7 +773,6 @@ Datum
 branch_create(PG_FUNCTION_ARGS)
 {
 	char *name = text_to_cstring(PG_GETARG_TEXT_PP(0));
-	BranchContext b;
 
 	if (strlen(name) == 0 || strlen(name) >= NAMEDATALEN || strcmp(name, "main") == 0)
 		ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("invalid branch name")));
@@ -766,8 +791,8 @@ branch_create(PG_FUNCTION_ARGS)
 		  GetLatestSnapshot(), true);
 	if (SPI_processed)
 		unsupported("fork with prepared transactions");
-	b = context();
-	Assert(b.id == 0);
+	if (context().id != 0)
+		elog(ERROR, "invalid native main branch identity");
 	query(psprintf("INSERT INTO branch_native.branches(name, cutoff) "
 				   "SELECT %s, COALESCE(max(id),0) FROM branch_native.versions",
 				   quote_literal_cstr(name)), GetLatestSnapshot(), false);
@@ -887,7 +912,6 @@ Datum
 branch_gc(PG_FUNCTION_ARGS)
 {
 	int64		count = 0;
-	MemoryContext caller = CurrentMemoryContext;
 	uint64		i,
 				n;
 	typedef struct DeadVersion
@@ -899,6 +923,8 @@ branch_gc(PG_FUNCTION_ARGS)
 		bool		deleted;
 	} DeadVersion;
 	DeadVersion *dead;
+
+	MemoryContext caller=CurrentMemoryContext;
 
 	BranchMaintenanceAdmission();
 	BranchCatalogPrepare();
@@ -1051,10 +1077,10 @@ BranchSchemaAdmission(void)
 	BranchContext b;
 
 	admission(ShareLock);
-	SPI_connect();
+
 	b = context();
 	writer_lock(b);
-	SPI_finish();
+
 }
 
 void
