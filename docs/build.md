@@ -24,10 +24,12 @@ Run server tests as an ordinary user.
 ## Native and framework acceptance
 
 From the repository root, install fixture dependencies in a separate environment.
-CI uses Node 23.6.1 for the pinned Prisma fixture.
+Use Python 3.13.9, matching the standalone runtime, and Node 23.6.1 for the
+pinned Prisma fixture. CI creates the client environment with that pinned
+interpreter rather than the runner's system Python.
 
 ```sh
-python3 -m venv /tmp/branchdb-client
+python3.13 -m venv /tmp/branchdb-client
 /tmp/branchdb-client/bin/pip install -r contrib/branch_mvcc/native_m8/requirements.txt
 npm --prefix contrib/branch_mvcc/native_m8/prisma ci
 /tmp/branchdb-client/bin/python -B contrib/branch_mvcc/native_m9/verify.py \
