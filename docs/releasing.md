@@ -29,6 +29,5 @@ Archives retain the `developer-beta` filename label; the GitHub release/tag and
 manifest's source commit identify their exact version. Release jobs need
 `contents: write`; build and pull-request jobs have read-only permissions.
 
-The [HN draft](hacker-news.md) is ready for the author's account after the public
-downloads have been checked. Keep milestone notes as development history rather
-than rewriting commits or using them as the primary quickstart.
+Keep milestone notes as development history rather than rewriting commits or
+using them as the primary quickstart.
