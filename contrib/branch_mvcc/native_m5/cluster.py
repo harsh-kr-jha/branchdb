@@ -72,8 +72,11 @@ class Cluster:
                                     '--dsn', self.dsn, '--branch', branch, '--port', str(port)],
                                    stdout=subprocess.PIPE, stderr=log, text=True, env=self.env)
         self.apps.append(process)
-        if not select.select([process.stdout], [], [], 12)[0]:
-            raise AssertionError('app did not start: '+branch)
+        # Hosted macOS runners can take longer on a cold interpreter/library
+        # launch. This is a readiness bound, not a query-performance assertion.
+        if not select.select([process.stdout], [], [], 60)[0]:
+            raise AssertionError('app did not start within 60 seconds: '+branch+
+                                 '\n'+(self.root/('app_'+branch+'.log')).read_text())
         line = process.stdout.readline()
         if not line:
             raise AssertionError('app exited: '+(self.root/('app_'+branch+'.log')).read_text())
