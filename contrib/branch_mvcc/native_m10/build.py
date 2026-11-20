@@ -202,12 +202,15 @@ def main():
         (root / "libexec").mkdir()
         (root / "share").mkdir()
         (root / "licenses").mkdir()
+        shutil.copyfile(SOURCE / "examples/branch-isolation.sh", root / "demo.sh")
+        (root / "demo.sh").chmod(0o755)
         shutil.copyfile(HERE / "branchdb.py", root / "libexec/branchdb.py")
         for n in (3, 6, 7, 8):
             directory = root / "share" / f"native_m{n}"
             directory.mkdir()
             shutil.copyfile(HERE / f"../native_m{n}/setup.sql", directory / "setup.sql")
         shutil.copyfile(SOURCE / "COPYRIGHT", root / "licenses/PostgreSQL-COPYRIGHT")
+        shutil.copyfile(SOURCE / "LICENSE", root / "licenses/BranchDB-LICENSE")
         shutil.copytree(HERE / "licenses", root / "licenses/dependencies")
         shutil.copyfile(
             args.python_prefix / "lib/python3.13/LICENSE.txt",

@@ -1,5 +1,12 @@
-Standalone development runtime: [milestone 10](native_m10/README.md), including
-relocatable branchdb packages and a persistent non-root Linux container.
+# BranchDB engineering records
+
+For current installation and use, start with the [project README](../../README.md),
+[compatibility guide](../../docs/compatibility.md), and
+[standalone runtime guide](native_m10/README.md).
+
+This directory retains historical prototypes, native checkpoints, fixtures, and
+validation evidence. The earlier SQL overlay below differs from today's native
+engine. See the [development history index](../../docs/development-history.md).
 
 # Persistent branch experiment
 

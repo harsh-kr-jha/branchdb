@@ -1,5 +1,9 @@
 # Standalone branchdb developer runtime
 
+Current project overview: [BranchDB](../../../README.md). Download tested archives
+from [Releases](https://github.com/harsh-kr-jha/branchdb/releases). After extraction,
+run `./branchdb/demo.sh ./branchdb` for a temporary branch-isolation demonstration.
+
 Milestone 10 packages the modified PostgreSQL engine, its shared libraries,
 CPython 3.13.9, bootstrap SQL and the `branchdb` CLI in one relocatable archive.
 The installed runtime needs neither system PostgreSQL nor Python, Node or an
