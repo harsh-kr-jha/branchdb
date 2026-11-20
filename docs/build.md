@@ -25,8 +25,9 @@ Run server tests as an ordinary user.
 
 From the repository root, install fixture dependencies in a separate environment.
 Use Python 3.13.9, matching the standalone runtime, and Node 23.6.1 for the
-pinned Prisma fixture. CI creates the client environment with that pinned
-interpreter rather than the runner's system Python.
+pinned Prisma fixture. CI installs a separate pinned interpreter for test clients;
+runtime acceptance temporarily hides the standalone packaging input to prove
+the archive does not depend on it.
 
 ```sh
 python3.13 -m venv /tmp/branchdb-client

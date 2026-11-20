@@ -37,6 +37,9 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13.9'
       - uses: actions/setup-node@v4
         with:
           node-version: '23.6.1'
@@ -59,7 +62,9 @@ jobs:
           "$RUNNER_TEMP/tools/bin/uv" python install 3.13.9 --install-dir "$RUNNER_TEMP/python-input" --no-bin --no-registry
           python_prefix=$(find "$RUNNER_TEMP/python-input" -maxdepth 1 -type d -name 'cpython-3.13.9-*' -print)
           echo "PYTHON_PREFIX=$python_prefix" >> "$GITHUB_ENV"
-          "$python_prefix/bin/python3" -m venv "$RUNNER_TEMP/client"
+          # Keep test clients independent of the standalone packaging input:
+          # acceptance temporarily hides that input to check relocation.
+          python3 -m venv "$RUNNER_TEMP/client"
           "$RUNNER_TEMP/client/bin/pip" install -r contrib/branch_mvcc/native_m8/requirements.txt
           npm --prefix contrib/branch_mvcc/native_m8/prisma ci
       - name: Build the native engine
